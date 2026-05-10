@@ -1,0 +1,30 @@
+namespace Lifeman.Client.Outbox;
+
+public interface IOutbox : IAsyncDisposable
+{
+    ValueTask InitAsync(CancellationToken ct = default);
+
+    /// Append a new event to the outbox. The payload is opaque JSON — the
+    /// kernel's input router decides what it means by routing on `surface`.
+    ValueTask<long> EnqueueAsync(string surface, string payloadJson, DateTimeOffset emittedAt, CancellationToken ct = default);
+
+    /// Peek the oldest N pending entries without removing them. Returned
+    /// oldest-first so the kernel sees events in roughly the order they
+    /// happened.
+    ValueTask<IReadOnlyList<OutboxEntry>> PeekAsync(int max, CancellationToken ct = default);
+
+    /// Mark entries as successfully uploaded (deletes them).
+    ValueTask AckAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
+
+    /// Mark entries as failed. Increments attempts; stores last error.
+    /// Permanent (non-retryable) failures are deleted to avoid poison-pill loops.
+    ValueTask FailAsync(IReadOnlyCollection<long> ids, string error, bool permanent, CancellationToken ct = default);
+
+    /// Total queued entries, including failed ones still under retry.
+    ValueTask<long> CountAsync(CancellationToken ct = default);
+
+    /// Drop oldest entries until the on-disk size is below the cap. Returns
+    /// number dropped. Critical events (urgency=urgent) are kept regardless
+    /// once that concept is plumbed through; v1 drops oldest first.
+    ValueTask<int> TrimAsync(long maxBytes, CancellationToken ct = default);
+}
