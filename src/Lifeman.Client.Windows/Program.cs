@@ -9,6 +9,7 @@ using Lifeman.Client.Outbox;
 using Lifeman.Client.Windows;
 using Lifeman.Client.Windows.Collectors;
 using Lifeman.Client.Windows.Config;
+using Lifeman.Client.Windows.Logging;
 using Lifeman.Client.Windows.Renderers;
 using Microsoft.Extensions.Logging;
 
@@ -20,11 +21,14 @@ var stateDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "lifeman", "client");
 Directory.CreateDirectory(stateDir);
+var logDir = Path.Combine(stateDir, "logs");
 
 var config = new DpapiConfigStore(Path.Combine(stateDir, "config.json"));
 
+using var fileLogProvider = new RollingFileLoggerProvider(logDir);
 using var loggerFactory = LoggerFactory.Create(b => b
     .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
+    .AddProvider(fileLogProvider)
     .SetMinimumLevel(LogLevel.Information));
 
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -77,11 +81,19 @@ async Task<int> StatusAsync()
     Console.WriteLine($"device_id: {await config.GetAsync(ConfigKeys.DeviceId) ?? "-"}");
     Console.WriteLine($"name:      {await config.GetAsync(ConfigKeys.DeviceName) ?? "-"}");
     Console.WriteLine($"autostart: {Autostart.CurrentCommand() ?? "(disabled)"}");
+    Console.WriteLine($"logs:      {logDir}");
     return 0;
 }
 
 async Task<int> RunAsync()
 {
+    using var single = SingleInstance.TryAcquire();
+    if (!single.Acquired)
+    {
+        Console.Error.WriteLine("another lifeman-client is already running for this user.");
+        return 2;
+    }
+
     if (await config.GetAsync(ConfigKeys.DeviceToken) is null)
     {
         Console.Error.WriteLine("no device token — run `pair` first.");
@@ -100,13 +112,24 @@ async Task<int> RunAsync()
     var responses = new OutputResponseClient(lifemanHttp, config);
     var renderer = new WindowsToastRenderer(responses);
 
-    var collectors = new List<ICollector> { new DesktopPowerCollector() };
+    // Network collector also retunes the uploader's batch profile when
+    // connectivity / metering changes — that's why it gets a reference.
+    var collectors = new List<ICollector>
+    {
+        new DesktopPowerCollector(),
+        new DesktopActiveWindowCollector(),
+        new DesktopIdleCollector(),
+        new DesktopNetworkCollector(uploader),
+    };
     await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
         loggerFactory.CreateLogger<LifemanClientHost>());
 
+    var log = loggerFactory.CreateLogger("lifeman-client");
+    log.LogInformation("running (collectors: {Count}, logs: {LogDir})", collectors.Count, logDir);
     Console.Error.WriteLine("[lifeman-client] running. Ctrl+C to stop.");
     try { await host.RunAsync(ctSource.Token); }
     catch (OperationCanceledException) when (ctSource.IsCancellationRequested) { }
+    log.LogInformation("stopped");
     return 0;
 }
 
