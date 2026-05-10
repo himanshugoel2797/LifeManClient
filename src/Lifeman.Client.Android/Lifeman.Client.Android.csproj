@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <!-- 24 = Android 7.0 Nougat — first version with adoptable storage / SAF
+         maturity. 33+ (Tiramisu) is where POST_NOTIFICATIONS becomes a
+         runtime permission and where foreground service types are
+         enforced; we handle that at runtime. -->
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>dev.lifeman.client</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <RootNamespace>Lifeman.Client.Android</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <!-- Trimming is on for Release; the shared core is reflection-free
+         (System.Text.Json source-generation would be a nice future
+         optimization, but JsonSerializer.Serialize/Deserialize on
+         simple records works under trim today). -->
+    <TrimMode>partial</TrimMode>
+    <!-- CA1416 fires for any API gated by an SDK version, even when we
+         guard via Build.VERSION.SdkInt inside a helper. We do guard at
+         runtime; the analyzer just can't see it across method boundaries. -->
+    <NoWarn>$(NoWarn);CA1416;CS1570</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lifeman.Client\Lifeman.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+    <PackageReference Include="Xamarin.AndroidX.Core" Version="1.13.1.5" />
+    <PackageReference Include="Xamarin.AndroidX.Activity" Version="1.9.2.1" />
+  </ItemGroup>
+</Project>
