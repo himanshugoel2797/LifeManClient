@@ -1,0 +1,53 @@
+# --- .NET / MAUI -----------------------------------------------------
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+Properties/launchSettings.json
+
+# Build outputs
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Tooling
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+# Android signing keystores — never commit; back up alongside the
+# kernel master key. See CLIENT_DESIGN.md §"Distribution & updates".
+*.keystore
+*.jks
+keystore.properties
+
+# Native build / publish output
+publish/
+out/
+artifacts/
+
+# OS noise
+.DS_Store
+Thumbs.db
