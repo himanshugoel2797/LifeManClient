@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lifeman.Client", "src\Lifem
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lifeman.Client.Tests", "tests\Lifeman.Client.Tests\Lifeman.Client.Tests.csproj", "{6C02AECF-7113-4181-9562-0D6BAB11C968}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lifeman.Client.DevHost", "src\Lifeman.Client.DevHost\Lifeman.Client.DevHost.csproj", "{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{6C02AECF-7113-4181-9562-0D6BAB11C968}.Release|x64.Build.0 = Release|Any CPU
 		{6C02AECF-7113-4181-9562-0D6BAB11C968}.Release|x86.ActiveCfg = Release|Any CPU
 		{6C02AECF-7113-4181-9562-0D6BAB11C968}.Release|x86.Build.0 = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|x64.Build.0 = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Debug|x86.Build.0 = Debug|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|x64.ActiveCfg = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|x64.Build.0 = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|x86.ActiveCfg = Release|Any CPU
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{ECD22C29-01AF-45BE-9379-8899226B8780} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{6C02AECF-7113-4181-9562-0D6BAB11C968} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{2BC8DF6D-8858-4670-8D1D-F8613D9F2002} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

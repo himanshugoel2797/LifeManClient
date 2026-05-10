@@ -64,7 +64,7 @@ public sealed class SseReceiver
         }
     }
 
-    private async Task StreamAsync(CancellationToken ct)
+    internal async Task StreamAsync(CancellationToken ct)
     {
         var token = await _config.GetAsync(ConfigKeys.DeviceToken, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(token))
@@ -160,7 +160,7 @@ public sealed class SseReceiver
         }
     }
 
-    private async Task CatchUpAsync(CancellationToken ct)
+    internal async Task CatchUpAsync(CancellationToken ct)
     {
         var cursor = await _config.GetAsync(ConfigKeys.PendingCursor, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(cursor)) return;
