@@ -4,12 +4,11 @@ using System.Threading.Channels;
 using Lifeman.Client.Collectors;
 using Microsoft.Win32;
 
-namespace Lifeman.Client.DevHost.Collectors;
+namespace Lifeman.Client.Windows.Collectors;
 
 /// `desktop.power` — emits an event on power-mode change (AC ↔ battery,
 /// suspend, resume) plus an initial snapshot on start. No permissions
-/// required, no API surface beyond stock Win32. The easiest first
-/// collector to prove the end-to-end loop with.
+/// required, no API surface beyond stock Win32.
 [SupportedOSPlatform("windows")]
 public sealed class DesktopPowerCollector : ICollector
 {
@@ -24,8 +23,6 @@ public sealed class DesktopPowerCollector : ICollector
             SingleWriter = false,
         });
 
-        // Initial snapshot so the kernel sees the device's current power
-        // state without having to wait for a transition.
         channel.Writer.TryWrite(Snapshot("startup"));
 
         PowerModeChangedEventHandler handler = (_, e) =>
@@ -45,7 +42,7 @@ public sealed class DesktopPowerCollector : ICollector
 
     private static CollectedEvent Snapshot(string trigger)
     {
-        var status = SystemInformation.PowerStatus();
+        var status = PowerStatus.Read();
         var payload = JsonSerializer.Serialize(new
         {
             trigger,
@@ -59,46 +56,35 @@ public sealed class DesktopPowerCollector : ICollector
 }
 
 [SupportedOSPlatform("windows")]
-internal static class SystemInformation
+internal static class PowerStatus
 {
-    public sealed record PowerSnapshot(bool? OnAc, float? BatteryLifePercent, bool? Charging);
+    public sealed record Snapshot(bool? OnAc, float? BatteryLifePercent, bool? Charging);
 
-    public static PowerSnapshot PowerStatus()
+    public static Snapshot Read()
     {
-        // System.Windows.Forms.SystemInformation.PowerStatus is the standard
-        // surface but pulling Forms into a console app drags in a lot. Use
-        // GetSystemPowerStatus directly.
-        var s = new Win32.SYSTEM_POWER_STATUS();
-        if (!Win32.GetSystemPowerStatus(ref s))
-            return new PowerSnapshot(null, null, null);
-
-        bool? onAc = s.ACLineStatus switch
-        {
-            0 => false,
-            1 => true,
-            _ => null,
-        };
+        var s = new Native.SYSTEM_POWER_STATUS();
+        if (!Native.GetSystemPowerStatus(ref s)) return new Snapshot(null, null, null);
+        bool? onAc = s.ACLineStatus switch { 0 => false, 1 => true, _ => null };
         float? pct = s.BatteryLifePercent == 255 ? null : s.BatteryLifePercent / 100f;
-        // BatteryFlag bit 8 set ⇒ charging.
         bool? charging = (s.BatteryFlag & 0x08) != 0;
-        return new PowerSnapshot(onAc, pct, charging);
+        return new Snapshot(onAc, pct, charging);
     }
-}
 
-internal static class Win32
-{
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    public struct SYSTEM_POWER_STATUS
+    private static class Native
     {
-        public byte ACLineStatus;
-        public byte BatteryFlag;
-        public byte BatteryLifePercent;
-        public byte SystemStatusFlag;
-        public uint BatteryLifeTime;
-        public uint BatteryFullLifeTime;
-    }
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        public struct SYSTEM_POWER_STATUS
+        {
+            public byte ACLineStatus;
+            public byte BatteryFlag;
+            public byte BatteryLifePercent;
+            public byte SystemStatusFlag;
+            public uint BatteryLifeTime;
+            public uint BatteryFullLifeTime;
+        }
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
-    public static extern bool GetSystemPowerStatus(ref SYSTEM_POWER_STATUS lpSystemPowerStatus);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+        public static extern bool GetSystemPowerStatus(ref SYSTEM_POWER_STATUS lpSystemPowerStatus);
+    }
 }
