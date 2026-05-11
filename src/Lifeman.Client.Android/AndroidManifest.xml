@@ -32,6 +32,14 @@
   <uses-permission android:name="android.permission.BLUETOOTH"
                    android:maxSdkVersion="30" />
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <!-- Needed by RichPackagePickerActivity. Android 11+ otherwise hides
+       all packages outside our manifest <queries> block, which would
+       leave the picker showing only the few apps we explicitly
+       declared a relationship to. Play Store treats this as a
+       restricted permission, but the lifeman client is sideloaded
+       (CLIENT_DESIGN §"Distribution") so the policy doesn't apply. -->
+  <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+                   tools:ignore="QueryAllPackagesPermission" />
 
   <application
     android:allowBackup="false"

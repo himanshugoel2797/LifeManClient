@@ -83,32 +83,37 @@ public sealed class RichPackagePickerActivity : Activity
             _selected.Add(p);
 
         var pm = PackageManager!;
-        var byPackage = new Dictionary<string, string>(StringComparer.Ordinal);
+        var byPackage = new Dictionary<string, (string Label, bool System)>(StringComparer.Ordinal);
 
-        // Launchable user apps (the obvious notifying apps). Filter
-        // out system apps to keep the list short; users on heavily-
-        // modified ROMs can still add a package by typing its name.
-        var intent = new Intent(Intent.ActionMain).AddCategory(Intent.CategoryLauncher);
-        var resolved = pm.QueryIntentActivities(intent, PackageInfoFlags.MatchDefaultOnly);
-        foreach (var r in resolved)
+        // Every installed application, not just launchable ones — many
+        // of the notifying apps (Messages, Clock, dialer, framework
+        // services) have no launcher icon. QUERY_ALL_PACKAGES in the
+        // manifest is what makes this return everything on Android 11+.
+        var apps = pm.GetInstalledApplications(PackageInfoFlags.MatchAll);
+        foreach (var ai in apps)
         {
-            var ai = r.ActivityInfo?.ApplicationInfo;
-            if (ai is null) continue;
+            if (ai.PackageName is null) continue;
+            var label = ai.LoadLabel(pm)?.ToString();
+            if (string.IsNullOrWhiteSpace(label) || label == ai.PackageName) label = ai.PackageName;
             var isSystem = (ai.Flags & ApplicationInfoFlags.System) != 0
                         && (ai.Flags & ApplicationInfoFlags.UpdatedSystemApp) == 0;
-            if (isSystem) continue;
-            byPackage[ai.PackageName!] = ai.LoadLabel(pm)?.ToString() ?? ai.PackageName!;
+            byPackage[ai.PackageName] = (label, isSystem);
         }
 
         // Ensure already-selected packages are visible even if they
-        // didn't survive the launchable-apps filter (system apps, or
-        // entries the kernel pushed manually).
+        // somehow didn't make the list (rare; e.g. uninstalled while
+        // selected, or kernel-pushed package-prefix entries).
         foreach (var s in _selected)
             if (!byPackage.ContainsKey(s) && !s.EndsWith('.'))
-                byPackage[s] = s;
+                byPackage[s] = (s, false);
 
-        _apps = byPackage.Select(kv => (kv.Key, kv.Value))
-            .OrderBy(t => t.Value, StringComparer.OrdinalIgnoreCase)
+        // User apps first (so the common case — your messaging /
+        // calendar / music apps — sits at the top), then system apps
+        // below. Within each group, sort alphabetically by label.
+        _apps = byPackage
+            .OrderBy(kv => kv.Value.System)
+            .ThenBy(kv => kv.Value.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => (kv.Key, kv.Value.Label))
             .ToList();
 
         RunOnUiThread(RenderList);
