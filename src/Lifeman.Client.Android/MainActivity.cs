@@ -121,6 +121,14 @@ public sealed class MainActivity : Activity
         };
         root.AddView(_pairBtn);
 
+        var scanBtn = new Button(this) { Text = "Scan QR" };
+        scanBtn.Click += (_, _) =>
+        {
+            try { StartActivityForResult(new Intent(this, typeof(QrScanActivity)), QrScanActivity.RequestCode); }
+            catch (Exception ex) { SetStatus($"scan failed to start: {ex.Message}"); }
+        };
+        root.AddView(scanBtn);
+
         _startBtn = new Button(this) { Text = "Start agent" };
         _startBtn.Click += async (_, _) => { LifemanService.Start(this); await Task.Delay(300); await RefreshStatusAsync(); };
         root.AddView(_startBtn);
@@ -260,6 +268,19 @@ public sealed class MainActivity : Activity
     protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
     {
         base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == QrScanActivity.RequestCode)
+        {
+            if (resultCode == Result.Ok)
+            {
+                var url = data?.GetStringExtra(QrScanActivity.ResultKey);
+                if (!string.IsNullOrEmpty(url))
+                {
+                    if (_input is not null) _input.Text = url;
+                    AttemptPair(url);
+                }
+            }
+            return;
+        }
         if (requestCode != MediaProjectionRequest) return;
         if (resultCode == Result.Ok && data is not null)
         {

@@ -37,6 +37,13 @@
   <uses-permission android:name="android.permission.BLUETOOTH"
                    android:maxSdkVersion="30" />
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <!-- Camera is used solely by QrScanActivity for the in-app pair-URL
+       scan. We don't keep a long-running camera session anywhere; the
+       activity acquires Camera2, decodes one valid lifeman:// URL, and
+       finishes. The system-camera deep-link path also works without
+       this permission for users who scan via their stock camera app. -->
+  <uses-permission android:name="android.permission.CAMERA" />
+  <uses-feature android:name="android.hardware.camera" android:required="false" />
   <!-- Needed by RichPackagePickerActivity. Android 11+ otherwise hides
        all packages outside our manifest <queries> block, which would
        leave the picker showing only the few apps we explicitly

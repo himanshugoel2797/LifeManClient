@@ -25,6 +25,12 @@ public static class ConfigKeys
     /// re-pair UI rather than churning silently against a dead token.
     public const string RepairRequired = "auth.repair_required";
 
+    /// Last FCM device token sent to the kernel via
+    /// `POST /api/devices/push-token`. Cached so we don't re-register
+    /// on every restart. The platform head supplies the live token via
+    /// `FcmRegistration.RegisterTokenAsync`.
+    public const string PushFcmToken = "push.fcm_token";
+
     /// Comma-separated list of Android package names whose notifications
     /// should be enriched with title / text / subText / ticker on
     /// upload. Empty (default) → metadata-only for every package.

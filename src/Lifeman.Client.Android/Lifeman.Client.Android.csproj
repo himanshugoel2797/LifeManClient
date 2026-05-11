@@ -39,5 +39,9 @@
          non-suspend façade where the binding provides one and falls
          back to TODO markers for the suspend-only paths. -->
     <PackageReference Include="Xamarin.AndroidX.Health.Connect.ConnectClient" Version="1.1.0.2" />
+    <!-- Pure-managed QR decoder. QrScanActivity feeds Camera2 YUV frames
+         straight into BarcodeReaderGeneric — no platform binding package
+         required, no Play Services dependency. -->
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 </Project>
