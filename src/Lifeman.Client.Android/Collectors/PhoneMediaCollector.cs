@@ -81,13 +81,16 @@ public sealed class PhoneMediaCollector : ICollector
             }
         }
 
+        // Dedicated HandlerThread so the OS callbacks (session
+        // changes, playback/metadata callbacks) dispatch on a worker
+        // looper we own — not on the app's main UI thread, where they
+        // would compete with input handling and animations.
+        var handlerThread = new HandlerThread("lifeman-media");
+        handlerThread.Start();
+        var handler = new Handler(handlerThread.Looper!);
+
         var listener = new SessionsChangedListener(RefreshSessions);
-        // Callbacks must dispatch on a thread with a Looper; the
-        // collector runs on a plain worker thread, so pin to the main
-        // looper. The work the callback does is just channel.Writer.TryWrite
-        // — cheap enough that running on the main thread is fine.
-        var mainHandler = new Handler(Looper.MainLooper!);
-        msm.AddOnActiveSessionsChangedListener(listener, component, mainHandler);
+        msm.AddOnActiveSessionsChangedListener(listener, component, handler);
         RefreshSessions();
 
         using var reg = ct.Register(() =>
@@ -95,6 +98,7 @@ public sealed class PhoneMediaCollector : ICollector
             try { msm.RemoveOnActiveSessionsChangedListener(listener); } catch { }
             foreach (var t in controllerTracking.Values) t.Detach();
             controllerTracking.Clear();
+            try { handlerThread.QuitSafely(); } catch { }
             channel.Writer.TryComplete();
         });
 

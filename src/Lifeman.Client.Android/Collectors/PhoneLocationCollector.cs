@@ -73,19 +73,24 @@ public sealed class PhoneLocationCollector : ICollector
             channel.Writer.TryWrite(new CollectedEvent("phone.location", payload, DateTimeOffset.UtcNow));
         }
 
+        // Dedicated HandlerThread so location callbacks don't run on
+        // the UI thread — Maps and similar apps can be chatty enough
+        // that even our 5-min throttle still bursts a few callbacks
+        // back-to-back, and we'd rather not stall input dispatch.
+        var handlerThread = new HandlerThread("lifeman-location");
+        handlerThread.Start();
+
         var listener = new PassiveListener(loc => PushLocation("passive_update", loc));
         try
         {
             // Minimum time 5min, minimum distance 50m — even on passive
-            // we throttle so a chatty foreground app (Maps) doesn't
-            // bury us. Explicit MainLooper because the collector runs
-            // on a worker thread without a Looper of its own.
+            // we throttle so a chatty foreground app doesn't bury us.
             lm.RequestLocationUpdates(
                 LocationManager.PassiveProvider!,
                 (long)TimeSpan.FromMinutes(5).TotalMilliseconds,
                 50f,
                 listener,
-                Looper.MainLooper!);
+                handlerThread.Looper!);
         }
         catch (Exception ex)
         {
@@ -128,6 +133,7 @@ public sealed class PhoneLocationCollector : ICollector
         using var reg = ct.Register(() =>
         {
             try { lm.RemoveUpdates(listener); } catch { }
+            try { handlerThread.QuitSafely(); } catch { }
             channel.Writer.TryComplete();
         });
 

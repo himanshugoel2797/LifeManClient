@@ -162,6 +162,14 @@ public sealed class MainActivity : Activity
                     .SetData(global::Android.Net.Uri.FromParts("package", PackageName, null)));
         });
 
+        var pickerHeader = new TextView(this) { Text = "Notification policy", TextSize = 12f };
+        pickerHeader.SetTextColor(global::Android.Graphics.Color.Argb(0xff, 0x66, 0x66, 0x66));
+        pickerHeader.SetPadding(0, 48, 0, 8);
+        root.AddView(pickerHeader);
+
+        AddPermissionRow(root, "Rich-payload packages…", () =>
+            StartActivity(new Intent(this, typeof(RichPackagePickerActivity))));
+
         SetContentView(outer);
     }
 
