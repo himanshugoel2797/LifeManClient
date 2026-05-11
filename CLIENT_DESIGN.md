@@ -56,7 +56,7 @@ What MAUI doesn't help with:
 │   └──────────────┘   └──────┬───────┘   └──────────────┘        │
 │                             │                   ▲                │
 │                       ┌─────┴────────┐    ┌────┴────────┐       │
-│                       │  Uploader    │    │  SSE / FCM  │       │
+│                       │  Uploader    │    │  SSE / Push │       │
 │                       │  + retry     │    │  receiver   │       │
 │                       └──────┬───────┘    └────┬────────┘       │
 │                              │                  │                │
@@ -99,8 +99,9 @@ What MAUI doesn't help with:
   rows uploaded. Exponential backoff on errors. Adaptive batch size: 1 row
   per request on Wi-Fi, up to 50 batched on metered/cellular to amortise
   radio wakes.
-- **SSE / FCM receiver.** Long-lived `EventSource` (Wi-Fi & desktop) or
-  push (cellular, future). Drives the output renderer.
+- **SSE / UnifiedPush receiver.** Long-lived `EventSource` (Wi-Fi &
+  desktop) or UnifiedPush wake (cellular, future). Drives the output
+  renderer.
 - **Pairing state.** Stores the device token (encrypted at rest using the
   platform keystore — Android Keystore / Windows DPAPI), server URL,
   collector enablement, and per-collector sample rates.
@@ -233,9 +234,13 @@ Delivery uses one of two transports:
 1. **SSE** (default). Client maintains a long-lived `GET /events?token=...`
    connection and listens for `output.deliver:<device_id>` events.
    Cheap on Wi-Fi & desktop; battery-expensive on cellular.
-2. **FCM push** (later). Server posts a wake-only message to FCM; client
-   pulls from `/api/outputs/pending?since=...`. Battery-friendly on
-   cellular. Requires running a Google project; deliberately deferred.
+2. **UnifiedPush** (later). Server POSTs a wake-only message to the
+   device's UnifiedPush endpoint (an HTTPS URL handed out by the
+   user's chosen distributor — ntfy, NextPush, FCM-UP, …). Client
+   pulls from `/api/outputs/pending?since=...` after waking.
+   Battery-friendly on cellular. Google-free: no Firebase project,
+   no service-account secrets, works on de-Googled phones. Deferred
+   only because the kernel-side publisher isn't shipped yet.
 
 The client's output renderer maps the received event to a platform
 notification:
@@ -430,6 +435,6 @@ In rough order:
 5. **Windows client** parallel to the Android collector work, since most
    of the shared code is exercised by either.
 6. **Health Connect collector** as the WearOS proxy.
-7. **FCM push transport** when SSE proves expensive on cellular.
+7. **UnifiedPush transport** when SSE proves expensive on cellular.
 
 Defer Kotlin watch app until specifically motivated.
