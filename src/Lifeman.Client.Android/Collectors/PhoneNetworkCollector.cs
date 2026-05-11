@@ -44,7 +44,7 @@ public sealed class PhoneNetworkCollector : ICollector
             var snap = Snapshot(trigger, net, caps);
             _uploader?.SetNetworkProfile(isMetered: snap.metered);
             channel.Writer.TryWrite(new CollectedEvent(Surface,
-                JsonSerializer.Serialize(snap), DateTimeOffset.UtcNow));
+                JsonSerializer.Serialize(snap, SnapJson.Options), DateTimeOffset.UtcNow));
         }
 
         var callback = new Callback(Push);
@@ -68,10 +68,17 @@ public sealed class PhoneNetworkCollector : ICollector
             yield return item;
     }
 
-    private record Snap(string trigger, bool available, bool metered, bool validated,
+    private sealed record Snap(string trigger, bool available, bool metered, bool validated,
         bool roaming, bool captive_portal, string transport, string timestamp);
 
-    private static dynamic Snapshot(string trigger, Network? net, NetworkCapabilities? caps)
+    private static class SnapJson
+    {
+        // snake_case fields are already correct on Snap; default options
+        // preserve them verbatim.
+        public static readonly JsonSerializerOptions Options = new();
+    }
+
+    private static Snap Snapshot(string trigger, Network? net, NetworkCapabilities? caps)
     {
         var transport = caps switch
         {
@@ -87,17 +94,15 @@ public sealed class PhoneNetworkCollector : ICollector
         var metered = !(caps?.HasCapability(NetCapability.NotMetered) ?? false);
         var roaming = !(caps?.HasCapability(NetCapability.NotRoaming) ?? true);
         var captive = caps?.HasCapability(NetCapability.CaptivePortal) ?? false;
-        return new
-        {
-            trigger,
-            available = net is not null,
-            metered,
-            validated,
-            roaming,
-            captive_portal = captive,
-            transport,
-            timestamp = DateTimeOffset.UtcNow.ToString("O"),
-        };
+        return new Snap(
+            trigger: trigger,
+            available: net is not null,
+            metered: metered,
+            validated: validated,
+            roaming: roaming,
+            captive_portal: captive,
+            transport: transport,
+            timestamp: DateTimeOffset.UtcNow.ToString("O"));
     }
 
     private sealed class Callback : ConnectivityManager.NetworkCallback

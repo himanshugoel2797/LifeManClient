@@ -53,10 +53,10 @@ public sealed class WindowsToastRenderer : IRenderer
         {
             // Argument shape: "outputId=…&action=…". Keep it compact to
             // stay under the toast XML argument-length limits.
-            var args = new ToastArguments()
-                .Add("outputId", deliver.OutputId)
-                .Add("action", action.Label);
-            builder.AddButton(new ToastButton().SetContent(action.Label).AddArgument("outputId", deliver.OutputId).AddArgument("action", action.Label));
+            builder.AddButton(new ToastButton()
+                .SetContent(action.Label)
+                .AddArgument("outputId", deliver.OutputId)
+                .AddArgument("action", action.Label));
         }
 
         // Use the output_id as both Tag and Group so cancel can dismiss

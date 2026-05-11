@@ -22,6 +22,7 @@ public sealed record OutputDeliver(
     [property: JsonPropertyName("actions")] IReadOnlyList<OutputAction> Actions,
     [property: JsonPropertyName("source_tool")] string? SourceTool,
     [property: JsonPropertyName("expires_at")] DateTimeOffset? ExpiresAt,
+    [property: JsonPropertyName("delivered_at")] DateTimeOffset? DeliveredAt,
     [property: JsonPropertyName("_seq")] long? Seq);
 
 public sealed record OutputCancel(

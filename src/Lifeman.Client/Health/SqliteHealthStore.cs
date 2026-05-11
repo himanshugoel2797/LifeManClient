@@ -2,13 +2,16 @@ using Microsoft.Data.Sqlite;
 
 namespace Lifeman.Client.Health;
 
-/// SQLite-backed `IHealthStore`. Shares the connection string with the
-/// outbox DB so a single file holds all client state — collectors don't
-/// need to know about a second handle.
+/// SQLite-backed `IHealthStore`. Shares the on-disk file with the outbox
+/// DB so a single file holds all client state — collectors don't need to
+/// know about a second handle. The first call lazily ensures the `health`
+/// table exists, so wiring order with `SqliteOutbox.InitAsync` doesn't
+/// matter.
 public sealed class SqliteHealthStore : IHealthStore
 {
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private int _schemaReady;
 
     public SqliteHealthStore(string path) => _path = path;
 
@@ -19,12 +22,31 @@ public sealed class SqliteHealthStore : IHealthStore
         return c;
     }
 
+    private async ValueTask EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
+    {
+        if (Volatile.Read(ref _schemaReady) == 1) return;
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS health (
+                surface          TEXT PRIMARY KEY,
+                last_success_at  TEXT,
+                last_error_at    TEXT,
+                last_error       TEXT,
+                success_count    INTEGER NOT NULL DEFAULT 0,
+                error_count      INTEGER NOT NULL DEFAULT 0
+            );
+            """;
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        Volatile.Write(ref _schemaReady, 1);
+    }
+
     public async ValueTask RecordSuccessAsync(string surface, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             await using var conn = Open();
+            await EnsureSchemaAsync(conn, ct).ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO health (surface, last_success_at, success_count)
@@ -46,6 +68,7 @@ public sealed class SqliteHealthStore : IHealthStore
         try
         {
             await using var conn = Open();
+            await EnsureSchemaAsync(conn, ct).ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO health (surface, last_error_at, last_error, error_count)
@@ -69,6 +92,7 @@ public sealed class SqliteHealthStore : IHealthStore
         try
         {
             await using var conn = Open();
+            await EnsureSchemaAsync(conn, ct).ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 SELECT surface, last_success_at, last_error_at, last_error, success_count, error_count

@@ -22,7 +22,7 @@ public sealed class AndroidNotificationRenderer : IRenderer
 
     private readonly Context _ctx;
     private readonly ConcurrentDictionary<string, int> _ids = new();
-    private static int _idSeed = 1000;
+    private int _idSeed = 1000;
 
     // The OS fires the delete intent both on user-dismiss AND on
     // programmatic NotificationManager.Cancel — these sets let

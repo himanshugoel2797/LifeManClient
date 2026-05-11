@@ -65,10 +65,14 @@ public sealed class LifemanService : Service
             return StartCommandResult.NotSticky;
         }
 
-        if (_hostTask is not null) return StartCommandResult.Sticky;
+        // Treat a completed/faulted task as "no task" so the OS can
+        // re-start us after a host crash without hanging on a stale
+        // reference. The catch in RunHostAsync logs the failure.
+        if (_hostTask is { IsCompleted: false }) return StartCommandResult.Sticky;
 
         StartForeground(NotificationId, BuildPersistentNotification());
         s_running = true;
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         _hostTask = Task.Run(() => RunHostAsync(_cts.Token));
         return StartCommandResult.Sticky;

@@ -15,8 +15,8 @@ namespace Lifeman.Client.Windows.Config;
 ///   { "device.token": { "p": "&lt;base64 dpapi blob&gt;" }, "server.base_url": "http://…" }
 ///
 /// A protected value is `{ "p": "<base64>" }`; a plain value is just the
-/// raw string. New keys default to plain unless ConfigKeys.IsSensitive
-/// reports them as sensitive.
+/// raw string. `ConfigKeys.IsSensitive` is the single source of truth for
+/// which keys are wrapped.
 [SupportedOSPlatform("windows")]
 public sealed class DpapiConfigStore : IConfigStore
 {
@@ -31,12 +31,6 @@ public sealed class DpapiConfigStore : IConfigStore
         _path = path;
         _entropy = Encoding.UTF8.GetBytes(entropyTag);
     }
-
-    public static bool IsSensitive(string key) => key switch
-    {
-        ConfigKeys.DeviceToken => true,
-        _ => false,
-    };
 
     private async Task EnsureLoadedAsync(CancellationToken ct)
     {
@@ -86,7 +80,7 @@ public sealed class DpapiConfigStore : IConfigStore
             writer.WriteStartObject();
             foreach (var kv in _cache)
             {
-                if (IsSensitive(kv.Key))
+                if (ConfigKeys.IsSensitive(kv.Key))
                 {
                     var cipher = ProtectedData.Protect(
                         Encoding.UTF8.GetBytes(kv.Value), _entropy, DataProtectionScope.CurrentUser);

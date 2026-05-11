@@ -159,13 +159,13 @@ public sealed class SseReceiver
                     if (deliver is not null)
                     {
                         if (OnDeliver is not null) await OnDeliver(deliver, ct).ConfigureAwait(false);
-                        // Advance the pending cursor so a later reconnect via
-                        // /api/outputs/pending only re-fetches events the
-                        // server delivered after this one. Best-effort: the
-                        // deliver payload has no `delivered_at`, so we use
-                        // local UtcNow — see docs/PARENT_REPO_REQUESTS.md.
-                        await _config.SetAsync(ConfigKeys.PendingCursor,
-                            DateTimeOffset.UtcNow.ToString("O"), ct).ConfigureAwait(false);
+                        // Advance the pending cursor using the server-stamped
+                        // delivered_at so a later reconnect via /api/outputs/pending
+                        // skips events we already saw. If the kernel didn't stamp it,
+                        // leave the cursor alone — /pending will replay and the
+                        // outbox-side dedup (TryMarkReceivedAsync) catches overlaps.
+                        if (deliver.DeliveredAt is { } at)
+                            await _config.SetAsync(ConfigKeys.PendingCursor, at.ToString("O"), ct).ConfigureAwait(false);
                     }
                     break;
                 case "output.cancel":

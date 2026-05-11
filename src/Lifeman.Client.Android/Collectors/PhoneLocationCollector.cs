@@ -122,17 +122,23 @@ public sealed class PhoneLocationCollector : ICollector
         }
 
         PushLocation("startup", Best());
-        _ = Task.Run(async () =>
+        var periodic = Task.Run(async () =>
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                while (!ct.IsCancellationRequested)
+                try
                 {
                     await Task.Delay(TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
                     PushLocation("periodic", Best());
                 }
+                catch (System.OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    // Don't let one bad provider call kill the loop — the
+                    // collector is supposed to keep ticking until ct fires.
+                    global::Android.Util.Log.Warn("lifeman", $"phone.location periodic tick failed: {ex.Message}");
+                }
             }
-            catch (System.OperationCanceledException) { }
         });
 
         using var reg = ct.Register(() =>

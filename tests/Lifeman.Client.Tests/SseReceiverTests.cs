@@ -87,7 +87,7 @@ public sealed class SseReceiverTests
             var resp = new PendingOutputsResponse(new[]
             {
                 new OutputDeliver("o1","d1","dev","alert","urgent",
-                    new OutputContent("t","b"), Array.Empty<OutputAction>(), null, null, 1),
+                    new OutputContent("t","b"), Array.Empty<OutputAction>(), null, null, null, 1),
             }, Cursor: "2026-05-10T22:03:25.000000+00:00");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

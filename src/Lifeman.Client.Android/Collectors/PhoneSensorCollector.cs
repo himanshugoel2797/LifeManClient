@@ -29,13 +29,13 @@ public sealed class PhoneSensorCollector : ICollector
     private readonly Context _ctx;
     private readonly Kind _kind;
     private readonly string _surface;
+    private readonly object _drainGate = new();
     private Channel<CollectedEvent>? _channel;
     private SensorManager? _manager;
     private Sensor? _sensor;
     private IDownsampler<Vec3Sample>? _peakDownsampler;
     private IDownsampler<Vec3Sample>? _meanVecDownsampler;
     private IDownsampler<float>? _meanScalarDownsampler;
-    private DateTimeOffset _lastEmit = DateTimeOffset.MinValue;
     private TimeSpan _heartbeat = TimeSpan.FromSeconds(30);
 
     public string Surface => _surface;
@@ -96,7 +96,6 @@ public sealed class PhoneSensorCollector : ICollector
         var rate = IsMotion(_kind) ? SensorDelay.Game : SensorDelay.Normal;
         var listener = new SensorListener(this);
         _manager.RegisterListener(listener, _sensor, rate);
-        _lastEmit = DateTimeOffset.UtcNow;
 
         // Heartbeat ticker drains windowed-mean downsamplers even when
         // the peak detector is silent — quiet-state context still matters.
@@ -172,17 +171,24 @@ public sealed class PhoneSensorCollector : ICollector
         if (e?.Values is null || _channel is null) return;
         var now = DateTimeOffset.UtcNow;
 
-        if (IsMotion(_kind) && e.Values.Count >= 3)
+        // The OS sensor callback (HandleSensorEvent) and the heartbeat
+        // Timer callback (DrainAll(force:true)) both touch the
+        // downsamplers; serialize them so a Vec3Sample.Add can't
+        // overlap a TryDrain on the same window state.
+        lock (_drainGate)
         {
-            var sample = new Vec3Sample(e.Values[0], e.Values[1], e.Values[2]);
-            _peakDownsampler?.Add(sample, now);
-            _meanVecDownsampler?.Add(sample, now);
-            DrainAll(force: false);
-        }
-        else if (e.Values.Count >= 1)
-        {
-            _meanScalarDownsampler?.Add(e.Values[0], now);
-            DrainAll(force: false);
+            if (IsMotion(_kind) && e.Values.Count >= 3)
+            {
+                var sample = new Vec3Sample(e.Values[0], e.Values[1], e.Values[2]);
+                _peakDownsampler?.Add(sample, now);
+                _meanVecDownsampler?.Add(sample, now);
+                DrainLocked(force: false);
+            }
+            else if (e.Values.Count >= 1)
+            {
+                _meanScalarDownsampler?.Add(e.Values[0], now);
+                DrainLocked(force: false);
+            }
         }
     }
 
@@ -193,6 +199,11 @@ public sealed class PhoneSensorCollector : ICollector
     private void DrainAll(bool force)
     {
         if (_channel is null) return;
+        lock (_drainGate) DrainLocked(force);
+    }
+
+    private void DrainLocked(bool force)
+    {
         try
         {
             if (_peakDownsampler is not null && _peakDownsampler.TryDrain(out var peak))
@@ -221,6 +232,5 @@ public sealed class PhoneSensorCollector : ICollector
             timestamp = DateTimeOffset.UtcNow.ToString("O"),
         });
         _channel.Writer.TryWrite(new CollectedEvent(_surface, payload, DateTimeOffset.UtcNow));
-        _lastEmit = DateTimeOffset.UtcNow;
     }
 }

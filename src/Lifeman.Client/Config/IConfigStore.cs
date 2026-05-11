@@ -37,4 +37,14 @@ public static class ConfigKeys
     /// Match is "exact OR prefix-match", so `com.google.` covers all
     /// Google apps without listing them individually.
     public const string NotificationRichPackages = "phone.notification.rich_packages";
+
+    /// Single source of truth for which keys must be wrapped by the
+    /// platform keystore before they hit disk. Used by every
+    /// `IConfigStore` implementation so the policy doesn't drift
+    /// between Android / Windows / DevHost.
+    public static bool IsSensitive(string key) => key switch
+    {
+        DeviceToken => true,
+        _ => false,
+    };
 }

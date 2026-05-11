@@ -123,6 +123,7 @@ public sealed class UpdateChecker
             Actions: Array.Empty<OutputAction>(),
             SourceTool: "client.update_checker",
             ExpiresAt: null,
+            DeliveredAt: null,
             Seq: null);
         return _renderer.ShowAsync(deliver, ct);
     }

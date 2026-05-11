@@ -40,7 +40,7 @@ public sealed class KeystoreConfigStore : IConfigStore
     {
         var raw = _prefs.GetString(key, null);
         if (raw is null) return ValueTask.FromResult<string?>(null);
-        if (IsSensitive(key))
+        if (ConfigKeys.IsSensitive(key))
         {
             try { return ValueTask.FromResult<string?>(Decrypt(raw)); }
             catch (Exception ex)
@@ -54,7 +54,7 @@ public sealed class KeystoreConfigStore : IConfigStore
 
     public ValueTask SetAsync(string key, string value, CancellationToken ct = default)
     {
-        var stored = IsSensitive(key) ? Encrypt(value) : value;
+        var stored = ConfigKeys.IsSensitive(key) ? Encrypt(value) : value;
         var ed = _prefs.Edit() ?? throw new InvalidOperationException();
         ed.PutString(key, stored);
         ed.Commit();
@@ -68,12 +68,6 @@ public sealed class KeystoreConfigStore : IConfigStore
         ed.Commit();
         return ValueTask.CompletedTask;
     }
-
-    private static bool IsSensitive(string key) => key switch
-    {
-        ConfigKeys.DeviceToken => true,
-        _ => false,
-    };
 
     private static void EnsureKey()
     {

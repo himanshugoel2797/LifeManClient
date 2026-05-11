@@ -43,14 +43,6 @@ public sealed class SqliteOutbox : IOutbox
                 received_at  TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_received_at ON received(received_at);
-            CREATE TABLE IF NOT EXISTS health (
-                surface          TEXT PRIMARY KEY,
-                last_success_at  TEXT,
-                last_error_at    TEXT,
-                last_error       TEXT,
-                success_count    INTEGER NOT NULL DEFAULT 0,
-                error_count      INTEGER NOT NULL DEFAULT 0
-            );
             """;
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 

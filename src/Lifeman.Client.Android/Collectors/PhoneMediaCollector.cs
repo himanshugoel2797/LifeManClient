@@ -51,6 +51,10 @@ public sealed class PhoneMediaCollector : ICollector
         });
 
         var controllerTracking = new Dictionary<MediaSession.Token, MediaSessionTracker>();
+        // Serializes mutations from the lifeman-media looper thread
+        // (RefreshSessions) and the cancellation callback (which can
+        // fire on any thread).
+        var trackingLock = new object();
 
         void RefreshSessions()
         {
@@ -62,26 +66,29 @@ public sealed class PhoneMediaCollector : ICollector
                 return;
             }
             var live = new HashSet<MediaSession.Token>();
-            foreach (var c in controllers ?? Array.Empty<global::Android.Media.Session.MediaController>())
+            lock (trackingLock)
             {
-                if (c.SessionToken is null) continue;
-                live.Add(c.SessionToken);
-                if (!controllerTracking.ContainsKey(c.SessionToken))
+                foreach (var c in controllers ?? Array.Empty<global::Android.Media.Session.MediaController>())
                 {
-                    var tracker = new MediaSessionTracker(c, ev => channel.Writer.TryWrite(ev));
-                    controllerTracking[c.SessionToken] = tracker;
-                    tracker.Attach();
-                    tracker.PushSnapshot("session_added");
+                    if (c.SessionToken is null) continue;
+                    live.Add(c.SessionToken);
+                    if (!controllerTracking.ContainsKey(c.SessionToken))
+                    {
+                        var tracker = new MediaSessionTracker(c, ev => channel.Writer.TryWrite(ev));
+                        controllerTracking[c.SessionToken] = tracker;
+                        tracker.Attach();
+                        tracker.PushSnapshot("session_added");
+                    }
                 }
-            }
-            // Drop trackers whose sessions are no longer in the active list.
-            foreach (var token in controllerTracking.Keys.ToArray())
-            {
-                if (!live.Contains(token))
+                // Drop trackers whose sessions are no longer in the active list.
+                foreach (var token in controllerTracking.Keys.ToArray())
                 {
-                    controllerTracking[token].PushSnapshot("session_removed");
-                    controllerTracking[token].Detach();
-                    controllerTracking.Remove(token);
+                    if (!live.Contains(token))
+                    {
+                        controllerTracking[token].PushSnapshot("session_removed");
+                        controllerTracking[token].Detach();
+                        controllerTracking.Remove(token);
+                    }
                 }
             }
         }
@@ -101,8 +108,11 @@ public sealed class PhoneMediaCollector : ICollector
         using var reg = ct.Register(() =>
         {
             try { msm.RemoveOnActiveSessionsChangedListener(listener); } catch { }
-            foreach (var t in controllerTracking.Values) t.Detach();
-            controllerTracking.Clear();
+            lock (trackingLock)
+            {
+                foreach (var t in controllerTracking.Values) t.Detach();
+                controllerTracking.Clear();
+            }
             try { handlerThread.QuitSafely(); } catch { }
             channel.Writer.TryComplete();
         });
