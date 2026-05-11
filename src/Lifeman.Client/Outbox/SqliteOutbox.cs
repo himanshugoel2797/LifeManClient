@@ -284,11 +284,21 @@ public sealed class SqliteOutbox : IOutbox
 
     public async ValueTask DisposeAsync()
     {
-        if (_conn is not null)
+        // Drain any in-flight operation before tearing the connection down,
+        // otherwise a concurrent EnqueueAsync sees _conn flip to null mid-call.
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await _conn.DisposeAsync().ConfigureAwait(false);
-            _conn = null;
+            if (_conn is not null)
+            {
+                await _conn.DisposeAsync().ConfigureAwait(false);
+                _conn = null;
+            }
         }
-        _gate.Dispose();
+        finally
+        {
+            _gate.Release();
+            _gate.Dispose();
+        }
     }
 }

@@ -156,12 +156,14 @@ public sealed class Uploader
         var error = $"HTTP {(int)status} {status}";
 
         // 401 → token revoked. Don't churn. Surface to caller via config
-        // flag; the head should drop into re-pair UI. Leave events in outbox.
+        // flag; the head should drop into re-pair UI. Leave events in outbox
+        // WITHOUT incrementing attempts — otherwise a long re-pair window
+        // ticks every queued row past MaxAttempts and we silently delete
+        // legitimate data the moment the user re-pairs.
         if (status == HttpStatusCode.Unauthorized)
         {
             _logger.LogError("uploader received 401 — device token may be revoked. Pause and re-pair.");
             await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);
-            await _outbox.FailAsync(ids, error, permanent: false, ct).ConfigureAwait(false);
             await Task.Delay(_options.MaxBackoff, ct).ConfigureAwait(false);
             return;
         }

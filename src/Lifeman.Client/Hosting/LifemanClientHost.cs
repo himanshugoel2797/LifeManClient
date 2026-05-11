@@ -22,6 +22,7 @@ public sealed class LifemanClientHost : IAsyncDisposable
     private readonly IHealthStore _health;
     private readonly Updates.UpdateChecker? _updates;
     private readonly ILogger<LifemanClientHost> _logger;
+    private readonly Func<OutputCancel, CancellationToken, Task> _onCancelHandler;
 
     public LifemanClientHost(
         IOutbox outbox,
@@ -41,8 +42,9 @@ public sealed class LifemanClientHost : IAsyncDisposable
         _health = health ?? new NullHealthStore();
         _updates = updates;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<LifemanClientHost>.Instance;
+        _onCancelHandler = (cancel, ct) => _renderer.DismissAsync(cancel.OutputId, ct);
         _sse.OnDeliver += DispatchDeliverAsync;
-        _sse.OnCancel += (cancel, ct) => _renderer.DismissAsync(cancel.OutputId, ct);
+        _sse.OnCancel += _onCancelHandler;
     }
 
     private async Task DispatchDeliverAsync(OutputDeliver deliver, CancellationToken ct)
@@ -146,5 +148,13 @@ public sealed class LifemanClientHost : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync() => _outbox.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        // Unsubscribe before disposing the outbox: SSE is constructor-
+        // injected and outlives the host in tests / restart paths, so
+        // leaking these handlers re-enters a torn-down renderer/outbox.
+        _sse.OnDeliver -= DispatchDeliverAsync;
+        _sse.OnCancel -= _onCancelHandler;
+        return _outbox.DisposeAsync();
+    }
 }

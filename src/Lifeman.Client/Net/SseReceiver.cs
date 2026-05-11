@@ -11,6 +11,10 @@ public sealed class SseReceiverOptions
 {
     public TimeSpan InitialReconnectDelay { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan MaxReconnectDelay { get; init; } = TimeSpan.FromMinutes(2);
+    /// If no SSE line arrives within this window, assume the TCP connection
+    /// half-opened (NAT rebind, AP swap) and force a reconnect. The kernel
+    /// emits keep-alive comments every ~15s, so this should be generous.
+    public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromSeconds(75);
 }
 
 /// Long-lived `/events?token=…` consumer plus `/api/outputs/pending`
@@ -55,6 +59,14 @@ public sealed class SseReceiver
             {
                 return;
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Token revoked. The RepairRequired flag is set; reconnecting
+                // will just produce another 401. Stop the loop and let the
+                // platform head drop into the re-pair UI.
+                _logger.LogError(ex, "SSE auth rejected — stopping until re-pair.");
+                return;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "SSE stream error; reconnecting in {Delay}", delay);
@@ -89,7 +101,18 @@ public sealed class SseReceiver
         var dataBuf = new System.Text.StringBuilder();
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+            using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            idleCts.CancelAfter(_options.InactivityTimeout);
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(idleCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // No bytes within InactivityTimeout — treat as dead connection.
+                throw new IOException($"SSE inactivity timeout after {_options.InactivityTimeout}.");
+            }
             if (line is null) break; // server closed
 
             if (line.Length == 0)
