@@ -40,22 +40,38 @@ public sealed class MainActivity : Activity
         BuildUi();
         MaybeRequestNotificationPermission();
 
+        global::Android.Util.Log.Info("lifeman",
+            $"OnCreate: action={Intent?.Action} data={Intent?.Data?.ToString() ?? "(none)"}");
+
         // Deep-link handoff: lifeman://pair?host=…&code=…
         if (Intent?.Action == Intent.ActionView && Intent.Data is global::Android.Net.Uri u)
+        {
+            global::Android.Util.Log.Info("lifeman", $"deep-link pair url: {u}");
             AttemptPair(u.ToString()!);
-
-        _ = RefreshStatusAsync();
+        }
+        else
+        {
+            _ = RefreshStatusAsync();
+        }
     }
 
     private void BuildUi()
     {
+        var scroll = new ScrollView(this);
         var root = new LinearLayout(this)
         {
             Orientation = global::Android.Widget.Orientation.Vertical,
         };
-        root.SetPadding(48, 48, 48, 48);
+        // Slightly generous top padding so the status field clears the
+        // action bar even before any window-insets handling.
+        root.SetPadding(48, 32, 48, 48);
+        scroll.AddView(root);
 
-        _status = new TextView(this) { TextSize = 16f, Text = "…" };
+        _status = new TextView(this)
+        {
+            TextSize = 14f,
+            Text = "…",
+        };
         root.AddView(_status);
 
         var label = new TextView(this) { Text = "Pair URL or code", TextSize = 14f };
@@ -81,7 +97,7 @@ public sealed class MainActivity : Activity
         _stopBtn.Click += (_, _) => { LifemanService.Stop(this); _ = RefreshStatusAsync(); };
         root.AddView(_stopBtn);
 
-        SetContentView(root);
+        SetContentView(scroll);
     }
 
     private void MaybeRequestNotificationPermission()
@@ -97,6 +113,7 @@ public sealed class MainActivity : Activity
     {
         try
         {
+            global::Android.Util.Log.Info("lifeman", $"AttemptPair: text={text}");
             string url, code;
             if (text.StartsWith("lifeman://", StringComparison.OrdinalIgnoreCase))
             {
@@ -107,8 +124,9 @@ public sealed class MainActivity : Activity
                 SetStatus("expected a lifeman:// URL");
                 return;
             }
+            global::Android.Util.Log.Info("lifeman", $"AttemptPair: url={url} code={code}");
 
-            SetStatus("pairing…");
+            SetStatus($"pairing → {url}");
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             var pairing = new PairingClient(http, _config!);
             var caps = new DeviceCapabilities(
@@ -116,12 +134,14 @@ public sealed class MainActivity : Activity
                 InterruptionLevel: "ambient", TypicalLatencyMs: 2000);
             var resp = await pairing.PairAsync(url, code,
                 $"android-{Build.Model}", "android", caps, CancellationToken.None);
+            global::Android.Util.Log.Info("lifeman", $"AttemptPair: paired device_id={resp.DeviceId}");
             SetStatus($"paired: {resp.DeviceId}\nstarting agent…");
             LifemanService.Start(this);
             await RefreshStatusAsync();
         }
         catch (Exception ex)
         {
+            global::Android.Util.Log.Error("lifeman", $"AttemptPair failed: {ex}");
             SetStatus($"pair failed: {ex.Message}");
         }
     }

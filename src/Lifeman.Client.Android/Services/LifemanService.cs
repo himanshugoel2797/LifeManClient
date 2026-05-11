@@ -5,12 +5,14 @@ using Android.OS;
 using AndroidX.Core.App;
 using Lifeman.Client.Android.Collectors;
 using Lifeman.Client.Android.Config;
+using Lifeman.Client.Android.Logging;
 using Lifeman.Client.Android.Renderers;
 using Lifeman.Client.Collectors;
 using Lifeman.Client.Config;
 using Lifeman.Client.Hosting;
 using Lifeman.Client.Net;
 using Lifeman.Client.Outbox;
+using Microsoft.Extensions.Logging;
 
 namespace Lifeman.Client.Android.Services;
 
@@ -34,6 +36,7 @@ public sealed class LifemanService : Service
     private CancellationTokenSource? _cts;
     private Task? _hostTask;
     private HttpClient? _http;
+    private ILoggerFactory? _loggerFactory;
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -45,6 +48,7 @@ public sealed class LifemanService : Service
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
+        global::Android.Util.Log.Info("lifeman", $"Service.OnStartCommand action={intent?.Action}");
         if (intent?.Action == ActionStop)
         {
             ShutdownInternal();
@@ -68,28 +72,37 @@ public sealed class LifemanService : Service
 
     private async Task RunHostAsync(CancellationToken ct)
     {
+        global::Android.Util.Log.Info("lifeman", "RunHostAsync: entered");
         try
         {
             var stateDir = FilesDir!.AbsolutePath;
+            global::Android.Util.Log.Info("lifeman", $"RunHostAsync: stateDir={stateDir}");
             var config = new KeystoreConfigStore(ApplicationContext!);
-            if (await config.GetAsync(ConfigKeys.DeviceToken, ct).ConfigureAwait(false) is null)
+            var token = await config.GetAsync(ConfigKeys.DeviceToken, ct).ConfigureAwait(false);
+            global::Android.Util.Log.Info("lifeman", $"RunHostAsync: token present={token is not null}");
+            if (token is null)
             {
                 global::Android.Util.Log.Warn("lifeman", "no device token; service stopping");
                 StopSelf();
                 return;
             }
 
+            _loggerFactory = LoggerFactory.Create(b => b
+                .AddProvider(new AndroidLogcatLoggerProvider())
+                .SetMinimumLevel(LogLevel.Information));
+
             _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            global::Android.Util.Log.Info("lifeman", "RunHostAsync: creating outbox");
             await using var outbox = new SqliteOutbox(System.IO.Path.Combine(stateDir, "outbox.db"));
+            global::Android.Util.Log.Info("lifeman", "RunHostAsync: wiring host");
             var lifemanHttp = new LifemanHttpClient(_http, config);
             var uploader = new Uploader(outbox, lifemanHttp, config,
-                options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(5) });
-            // Phones are typically metered or treated as such — start
-            // with large batches to amortise radio wakeups. The kernel
-            // can push us toward smaller batches as it sees fit.
+                options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(5) },
+                logger: _loggerFactory.CreateLogger<Uploader>());
             uploader.SetNetworkProfile(isMetered: true);
 
-            var sse = new SseReceiver(lifemanHttp, config);
+            var sse = new SseReceiver(lifemanHttp, config,
+                logger: _loggerFactory.CreateLogger<SseReceiver>());
             var responses = new OutputResponseClient(lifemanHttp, config);
             var renderer = new AndroidNotificationRenderer(ApplicationContext!);
 
@@ -98,8 +111,11 @@ public sealed class LifemanService : Service
                 new PhoneBatteryCollector(ApplicationContext!),
             };
 
-            await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors);
+            await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
+                _loggerFactory.CreateLogger<LifemanClientHost>());
+            global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync starting");
             await host.RunAsync(ct).ConfigureAwait(false);
+            global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync returned");
         }
         catch (System.OperationCanceledException) { /* shutdown */ }
         catch (Exception ex)
@@ -113,7 +129,8 @@ public sealed class LifemanService : Service
         try { _cts?.Cancel(); } catch { }
         try { _hostTask?.Wait(TimeSpan.FromSeconds(3)); } catch { }
         try { _http?.Dispose(); } catch { }
-        _cts = null; _hostTask = null; _http = null;
+        try { _loggerFactory?.Dispose(); } catch { }
+        _cts = null; _hostTask = null; _http = null; _loggerFactory = null;
         try { StopForeground(StopForegroundFlags.Remove); } catch { }
     }
 

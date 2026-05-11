@@ -15,6 +15,11 @@
     android:icon="@mipmap/appicon"
     android:label="@string/app_name"
     android:roundIcon="@mipmap/appicon_round"
-    android:supportsRtl="true">
+    android:supportsRtl="true"
+    android:usesCleartextTraffic="true">
+    <!-- Cleartext is on so dev / emulator can reach a localhost kernel
+         via 10.0.2.2:8390 (or a LAN IP on a real phone). The kernel
+         doesn't terminate TLS itself; production deployments are
+         expected to front it with a reverse proxy that does. -->
   </application>
 </manifest>

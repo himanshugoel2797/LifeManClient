@@ -39,7 +39,9 @@ public sealed class LifemanClientHost : IAsyncDisposable
 
     public async Task RunAsync(CancellationToken ct)
     {
+        _logger.LogInformation("host: init outbox");
         await _outbox.InitAsync(ct).ConfigureAwait(false);
+        _logger.LogInformation("host: outbox ready; starting uploader+sse+{N} collectors", _collectors.Count);
 
         var tasks = new List<Task>
         {
