@@ -97,24 +97,25 @@ async Task<int> RunAsync()
         return 1;
     }
 
-    await using var outbox = new SqliteOutbox(Path.Combine(stateDir, "outbox.db"));
-    var lifemanHttp = new LifemanHttpClient(http, config);
-    var uploader = new Uploader(outbox, lifemanHttp, config,
-        options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(2) },
-        logger: loggerFactory.CreateLogger<Uploader>());
-    uploader.SetNetworkProfile(isMetered: false);
-    var sse = new SseReceiver(lifemanHttp, config,
-        logger: loggerFactory.CreateLogger<SseReceiver>());
-    var renderer = new ConsoleRenderer();
-    var collectors = new List<ICollector> { new HeartbeatCollector(TimeSpan.FromSeconds(30)) };
-
-    await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
-        loggerFactory.CreateLogger<LifemanClientHost>());
+    await using var bundle = ClientHostFactory.Build(
+        http, config, loggerFactory,
+        rendererFactory: _ => new ConsoleRenderer(),
+        collectorsFactory: _ => Array.Empty<ICollector>(),
+        options: new ClientHostOptions
+        {
+            OutboxPath = Path.Combine(stateDir, "outbox.db"),
+            Platform = "devhost",
+            CurrentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
+            UploaderIdlePoll = TimeSpan.FromSeconds(2),
+            HeartbeatInterval = TimeSpan.FromSeconds(30),
+            MeteredByDefault = false,
+            EnableUpdateChecker = false,
+        });
 
     Console.Error.WriteLine("[devhost] running. Ctrl+C to stop.");
     try
     {
-        await host.RunAsync(ctSource.Token);
+        await bundle.Host.RunAsync(ctSource.Token);
     }
     catch (OperationCanceledException) when (ctSource.IsCancellationRequested)
     {

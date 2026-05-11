@@ -102,48 +102,36 @@ async Task<int> RunAsync()
         Console.Error.WriteLine("no device token — run `pair` first.");
         return 1;
     }
-    var outboxPath = Path.Combine(stateDir, "outbox.db");
-    await using var outbox = new SqliteOutbox(outboxPath);
-    var health = new SqliteHealthStore(outboxPath);
-    RuntimeState.CurrentOutbox = outbox;
-    var lifemanHttp = new LifemanHttpClient(http, config);
-    var uploader = new Uploader(outbox, lifemanHttp, config,
-        options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(2) },
-        logger: loggerFactory.CreateLogger<Uploader>());
-    uploader.SetNetworkProfile(isMetered: false);
-
-    var sse = new SseReceiver(lifemanHttp, config,
-        logger: loggerFactory.CreateLogger<SseReceiver>());
-
-    var responses = new OutputResponseClient(lifemanHttp, config);
-    var renderer = new WindowsToastRenderer(responses);
-
-    // Network collector also retunes the uploader's batch profile when
-    // connectivity / metering changes — that's why it gets a reference.
-    var collectors = new List<ICollector>
-    {
-        new HeartbeatCollector(TimeSpan.FromMinutes(5)),
-        new DesktopPowerCollector(),
-        new DesktopActiveWindowCollector(),
-        new DesktopIdleCollector(),
-        new DesktopNetworkCollector(uploader),
-        new DesktopSessionCollector(),
-        new DesktopProcessListCollector(),
-        new DesktopNotificationCollector(),
-        new DesktopScreenCaptureCollector(),
-    };
-    var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-    var updates = new UpdateChecker(lifemanHttp, renderer, "windows", currentVersion,
-        logger: loggerFactory.CreateLogger<UpdateChecker>());
-    await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
-        loggerFactory.CreateLogger<LifemanClientHost>(),
-        health: health,
-        updates: updates);
+    await using var bundle = ClientHostFactory.Build(
+        http, config, loggerFactory,
+        rendererFactory: responses => new WindowsToastRenderer(responses),
+        // Network collector retunes the uploader's batch profile when
+        // connectivity / metering changes — that's why it gets a reference.
+        collectorsFactory: uploader => new ICollector[]
+        {
+            new DesktopPowerCollector(),
+            new DesktopActiveWindowCollector(),
+            new DesktopIdleCollector(),
+            new DesktopNetworkCollector(uploader),
+            new DesktopSessionCollector(),
+            new DesktopProcessListCollector(),
+            new DesktopNotificationCollector(),
+            new DesktopScreenCaptureCollector(),
+        },
+        options: new ClientHostOptions
+        {
+            OutboxPath = Path.Combine(stateDir, "outbox.db"),
+            Platform = "windows",
+            CurrentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
+            UploaderIdlePoll = TimeSpan.FromSeconds(2),
+            MeteredByDefault = false,
+        });
+    RuntimeState.CurrentOutbox = bundle.Outbox;
 
     var log = loggerFactory.CreateLogger("lifeman-client");
-    log.LogInformation("running (collectors: {Count}, logs: {LogDir})", collectors.Count, logDir);
+    log.LogInformation("running (collectors: {Count}, logs: {LogDir})", bundle.CollectorCount, logDir);
     Console.Error.WriteLine("[lifeman-client] running. Ctrl+C to stop.");
-    try { await host.RunAsync(ctSource.Token); }
+    try { await bundle.Host.RunAsync(ctSource.Token); }
     catch (OperationCanceledException) when (ctSource.IsCancellationRequested) { }
     log.LogInformation("stopped");
     return 0;

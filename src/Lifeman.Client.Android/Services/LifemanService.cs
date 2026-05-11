@@ -106,69 +106,57 @@ public sealed class LifemanService : Service
                 .SetMinimumLevel(LogLevel.Information));
 
             _http = new HttpClient(new DeviceTokenHandler(config)) { Timeout = TimeSpan.FromSeconds(30) };
-            global::Android.Util.Log.Info("lifeman", "RunHostAsync: creating outbox");
-            var outboxPath = System.IO.Path.Combine(stateDir, "outbox.db");
-            await using var outbox = new SqliteOutbox(outboxPath);
-            var health = new SqliteHealthStore(outboxPath);
-            CurrentOutbox = outbox;
-            global::Android.Util.Log.Info("lifeman", "RunHostAsync: wiring host");
-            var lifemanHttp = new LifemanHttpClient(_http, config);
-            var uploader = new Uploader(outbox, lifemanHttp, config,
-                options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(5) },
-                logger: _loggerFactory.CreateLogger<Uploader>());
-            uploader.SetNetworkProfile(isMetered: true);
-
-            var sse = new SseReceiver(lifemanHttp, config,
-                logger: _loggerFactory.CreateLogger<SseReceiver>());
-            var responses = new OutputResponseClient(lifemanHttp, config);
-            var renderer = new AndroidNotificationRenderer(ApplicationContext!);
-
             var ctx = ApplicationContext!;
-            // Collectors gated by permissions self-disable to no-op
-            // generators if their grant is missing, so it's safe to
-            // include them unconditionally — they just stay quiet until
-            // the user opens the permission helpers in MainActivity.
-            var collectors = new List<ICollector>
-            {
-                new HeartbeatCollector(TimeSpan.FromMinutes(5)),
-                new PhoneBatteryCollector(ctx),
-                new PhoneScreenCollector(ctx),
-                new PhoneIdleCollector(ctx),
-                new PhoneNetworkCollector(ctx, uploader),
-                new PhoneHeadphonesCollector(ctx),
-                new PhoneAlarmsCollector(ctx),
-                new PhoneLocaleCollector(ctx),
-                new PhoneForegroundAppCollector(ctx),       // needs PACKAGE_USAGE_STATS
-                new PhoneNotificationCollector(ctx, config),// needs Notification access
-                new PhoneMediaCollector(ctx),               // needs Notification access
-                new PhoneCalendarCollector(ctx),            // needs READ_CALENDAR
-                new PhoneLocationCollector(ctx),            // needs ACCESS_FINE_LOCATION
-                new PhoneBluetoothAudioCollector(ctx),      // needs BLUETOOTH_CONNECT (S+)
-                new PhoneHealthConnectCollector(ctx, config), // needs Health Connect read perms (per-record-type)
-                // Self-disables until the user grants MediaProjection consent
-                // via MainActivity ("Enable screen capture"), which stashes
-                // the consent intent in MediaProjectionState.
-                new PhoneScreenCaptureCollector(ctx),
-                // Sensor surfaces. Each self-disables if the device lacks
-                // the hardware. Downsamplers cap emission to ~1–60/min.
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Accelerometer),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Gyroscope),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Magnetometer),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Light),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Pressure),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.AmbientTemperature),
-                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Proximity),
-            };
 
-            var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-            var updates = new UpdateChecker(lifemanHttp, renderer, "android", currentVersion,
-                logger: _loggerFactory.CreateLogger<UpdateChecker>());
-            await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
-                _loggerFactory.CreateLogger<LifemanClientHost>(),
-                health: health,
-                updates: updates);
+            await using var bundle = ClientHostFactory.Build(
+                _http, config, _loggerFactory,
+                rendererFactory: _ => new AndroidNotificationRenderer(ctx),
+                // Collectors gated by permissions self-disable to no-op
+                // generators if their grant is missing, so it's safe to
+                // include them unconditionally — they just stay quiet until
+                // the user opens the permission helpers in MainActivity.
+                collectorsFactory: uploader => new ICollector[]
+                {
+                    new PhoneBatteryCollector(ctx),
+                    new PhoneScreenCollector(ctx),
+                    new PhoneIdleCollector(ctx),
+                    new PhoneNetworkCollector(ctx, uploader),
+                    new PhoneHeadphonesCollector(ctx),
+                    new PhoneAlarmsCollector(ctx),
+                    new PhoneLocaleCollector(ctx),
+                    new PhoneForegroundAppCollector(ctx),       // needs PACKAGE_USAGE_STATS
+                    new PhoneNotificationCollector(ctx, config),// needs Notification access
+                    new PhoneMediaCollector(ctx),               // needs Notification access
+                    new PhoneCalendarCollector(ctx),            // needs READ_CALENDAR
+                    new PhoneLocationCollector(ctx),            // needs ACCESS_FINE_LOCATION
+                    new PhoneBluetoothAudioCollector(ctx),      // needs BLUETOOTH_CONNECT (S+)
+                    new PhoneHealthConnectCollector(ctx, config), // needs Health Connect read perms (per-record-type)
+                    // Self-disables until the user grants MediaProjection consent
+                    // via MainActivity ("Enable screen capture"), which stashes
+                    // the consent intent in MediaProjectionState.
+                    new PhoneScreenCaptureCollector(ctx),
+                    // Sensor surfaces. Each self-disables if the device lacks
+                    // the hardware. Downsamplers cap emission to ~1–60/min.
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Accelerometer),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Gyroscope),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Magnetometer),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Light),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Pressure),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.AmbientTemperature),
+                    new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Proximity),
+                },
+                options: new ClientHostOptions
+                {
+                    OutboxPath = System.IO.Path.Combine(stateDir, "outbox.db"),
+                    Platform = "android",
+                    CurrentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
+                    UploaderIdlePoll = TimeSpan.FromSeconds(5),
+                    MeteredByDefault = true,
+                });
+            CurrentOutbox = bundle.Outbox;
+
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync starting");
-            await host.RunAsync(ct).ConfigureAwait(false);
+            await bundle.Host.RunAsync(ct).ConfigureAwait(false);
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync returned");
         }
         catch (System.OperationCanceledException) { /* shutdown */ }
