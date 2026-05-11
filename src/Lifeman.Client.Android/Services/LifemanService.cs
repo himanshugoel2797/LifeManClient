@@ -110,6 +110,10 @@ public sealed class LifemanService : Service
             var renderer = new AndroidNotificationRenderer(ApplicationContext!);
 
             var ctx = ApplicationContext!;
+            // Collectors gated by permissions self-disable to no-op
+            // generators if their grant is missing, so it's safe to
+            // include them unconditionally — they just stay quiet until
+            // the user opens the permission helpers in MainActivity.
             var collectors = new List<ICollector>
             {
                 new HeartbeatCollector(TimeSpan.FromMinutes(5)),
@@ -118,9 +122,13 @@ public sealed class LifemanService : Service
                 new PhoneIdleCollector(ctx),
                 new PhoneNetworkCollector(ctx, uploader),
                 new PhoneHeadphonesCollector(ctx),
-                // Foreground-app collector self-disables if
-                // PACKAGE_USAGE_STATS isn't granted (no-op generator).
-                new PhoneForegroundAppCollector(ctx),
+                new PhoneAlarmsCollector(ctx),
+                new PhoneLocaleCollector(ctx),
+                new PhoneForegroundAppCollector(ctx),     // needs PACKAGE_USAGE_STATS
+                new PhoneNotificationCollector(ctx),      // needs Notification access
+                new PhoneMediaCollector(ctx),             // needs Notification access
+                new PhoneCalendarCollector(ctx),          // needs READ_CALENDAR
+                new PhoneLocationCollector(ctx),          // needs ACCESS_FINE_LOCATION
             };
 
             await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,

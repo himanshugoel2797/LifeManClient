@@ -121,6 +121,7 @@ async Task<int> RunAsync()
         new DesktopActiveWindowCollector(),
         new DesktopIdleCollector(),
         new DesktopNetworkCollector(uploader),
+        new DesktopSessionCollector(),
     };
     await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
         loggerFactory.CreateLogger<LifemanClientHost>());

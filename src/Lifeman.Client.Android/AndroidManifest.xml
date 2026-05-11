@@ -16,6 +16,16 @@
        foreground-app collector no-ops silently if the grant is missing. -->
   <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
                    tools:ignore="ProtectedPermissions" />
+  <!-- Calendar events. Runtime permission (dangerous group). -->
+  <uses-permission android:name="android.permission.READ_CALENDAR" />
+  <!-- Location. FINE drives the passive listener; BACKGROUND keeps it
+       flowing when the foreground service is the user's only active
+       component. Both are runtime permissions; the user must
+       additionally grant background access via the "Allow all the
+       time" dialog on Android 10+. -->
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
   <application
     android:allowBackup="false"

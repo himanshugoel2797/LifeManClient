@@ -1,10 +1,12 @@
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
+using Android.Provider;
 using Android.Views;
 using Android.Widget;
 using AndroidX.Core.App;
 using AndroidX.Core.Content;
+using Lifeman.Client.Android.Collectors;
 using Lifeman.Client.Android.Config;
 using Lifeman.Client.Android.Services;
 using Lifeman.Client.Config;
@@ -126,7 +128,46 @@ public sealed class MainActivity : Activity
         _stopBtn.Click += async (_, _) => { LifemanService.Stop(this); await Task.Delay(300); await RefreshStatusAsync(); };
         root.AddView(_stopBtn);
 
+        // Permission helpers — each one deep-links into the right
+        // Settings page so the user doesn't have to hunt for it.
+        var permHeader = new TextView(this) { Text = "Permissions", TextSize = 12f };
+        permHeader.SetTextColor(global::Android.Graphics.Color.Argb(0xff, 0x66, 0x66, 0x66));
+        permHeader.SetPadding(0, 48, 0, 8);
+        root.AddView(permHeader);
+
+        AddPermissionRow(root, "Usage access (foreground app)", () =>
+            StartActivity(new Intent(Settings.ActionUsageAccessSettings)));
+        AddPermissionRow(root, "Notification access (notifications, media)", () =>
+            StartActivity(new Intent(Settings.ActionNotificationListenerSettings)));
+        AddPermissionRow(root, "Calendar + location (runtime)", () =>
+            ActivityCompat.RequestPermissions(this, new[]
+            {
+                global::Android.Manifest.Permission.ReadCalendar,
+                global::Android.Manifest.Permission.AccessFineLocation,
+                global::Android.Manifest.Permission.AccessCoarseLocation,
+            }, RuntimePermsRequest));
+        AddPermissionRow(root, "Background location (Allow all the time)", () =>
+        {
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.Q)
+                ActivityCompat.RequestPermissions(this, new[]
+                    { global::Android.Manifest.Permission.AccessBackgroundLocation },
+                    RuntimePermsRequest);
+            else
+                StartActivity(new Intent(Settings.ActionApplicationDetailsSettings)
+                    .SetData(global::Android.Net.Uri.FromParts("package", PackageName, null)));
+        });
+
         SetContentView(outer);
+    }
+
+    private const int RuntimePermsRequest = 0x20;
+
+    private void AddPermissionRow(LinearLayout root, string label, Action onClick)
+    {
+        var btn = new Button(this) { Text = label };
+        btn.Click += (_, _) => { try { onClick(); } catch (Exception ex)
+            { global::Android.Util.Log.Warn("lifeman", $"perm row failed: {ex.Message}"); } };
+        root.AddView(btn);
     }
 
     private void MaybeRequestNotificationPermission()
