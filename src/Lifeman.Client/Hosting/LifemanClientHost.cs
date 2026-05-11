@@ -21,6 +21,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
     private readonly IReadOnlyList<ICollector> _collectors;
     private readonly IHealthStore _health;
     private readonly Updates.UpdateChecker? _updates;
+    private readonly ClientRuntimeMetrics? _metrics;
+    private readonly long _outboxMaxBytes;
     private readonly ILogger<LifemanClientHost> _logger;
     private readonly Func<OutputCancel, CancellationToken, Task> _onCancelHandler;
 
@@ -32,7 +34,9 @@ public sealed class LifemanClientHost : IAsyncDisposable
         IReadOnlyList<ICollector> collectors,
         ILogger<LifemanClientHost>? logger = null,
         IHealthStore? health = null,
-        Updates.UpdateChecker? updates = null)
+        Updates.UpdateChecker? updates = null,
+        ClientRuntimeMetrics? metrics = null,
+        long outboxMaxBytes = 100L * 1024 * 1024)
     {
         _outbox = outbox;
         _uploader = uploader;
@@ -41,6 +45,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
         _collectors = collectors;
         _health = health ?? new NullHealthStore();
         _updates = updates;
+        _metrics = metrics;
+        _outboxMaxBytes = outboxMaxBytes;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<LifemanClientHost>.Instance;
         _onCancelHandler = (cancel, ct) => _renderer.DismissAsync(cancel.OutputId, ct);
         _sse.OnDeliver += DispatchDeliverAsync;
@@ -59,6 +65,7 @@ public sealed class LifemanClientHost : IAsyncDisposable
             return;
         }
         await _renderer.ShowAsync(deliver, ct).ConfigureAwait(false);
+        _metrics?.RecordRender();
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -72,6 +79,7 @@ public sealed class LifemanClientHost : IAsyncDisposable
             _uploader.RunAsync(ct),
             _sse.RunAsync(ct),
             TrimReceivedLoopAsync(ct),
+            TrimOutboxLoopAsync(ct),
         };
         if (_updates is not null)
             tasks.Add(_updates.RunAsync(ct));
@@ -79,6 +87,29 @@ public sealed class LifemanClientHost : IAsyncDisposable
             tasks.Add(RunCollectorAsync(collector, ct));
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
+    private async Task TrimOutboxLoopAsync(CancellationToken ct)
+    {
+        // Enforce the on-disk size cap per CLIENT_DESIGN §"Local storage
+        // & offline". TrimAsync is a no-op below the cap, so polling
+        // every ~5 minutes is essentially free.
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var dropped = await _outbox.TrimAsync(_outboxMaxBytes, ct).ConfigureAwait(false);
+                    if (dropped > 0)
+                        _logger.LogWarning("outbox trim dropped {Count} oldest non-critical events to stay under {Cap} bytes",
+                            dropped, _outboxMaxBytes);
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "outbox trim failed"); }
+                await Task.Delay(TimeSpan.FromMinutes(5), ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
 
     private async Task TrimReceivedLoopAsync(CancellationToken ct)

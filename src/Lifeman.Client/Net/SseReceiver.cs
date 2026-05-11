@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Lifeman.Client.Config;
 using Lifeman.Client.Contracts;
+using Lifeman.Client.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Lifeman.Client.Net;
@@ -26,6 +27,7 @@ public sealed class SseReceiver
     private readonly IConfigStore _config;
     private readonly SseReceiverOptions _options;
     private readonly ILogger<SseReceiver> _logger;
+    private readonly ClientRuntimeMetrics? _metrics;
 
     public event Func<OutputDeliver, CancellationToken, Task>? OnDeliver;
     public event Func<OutputCancel, CancellationToken, Task>? OnCancel;
@@ -35,12 +37,14 @@ public sealed class SseReceiver
         LifemanHttpClient client,
         IConfigStore config,
         SseReceiverOptions? options = null,
-        ILogger<SseReceiver>? logger = null)
+        ILogger<SseReceiver>? logger = null,
+        ClientRuntimeMetrics? metrics = null)
     {
         _client = client;
         _config = config;
         _options = options ?? new SseReceiverOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SseReceiver>.Instance;
+        _metrics = metrics;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -97,6 +101,7 @@ public sealed class SseReceiver
             throw new UnauthorizedAccessException("SSE returned 401 — re-pair required.");
         }
         resp.EnsureSuccessStatusCode();
+        _metrics?.RecordSseConnect();
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new StreamReader(stream);
@@ -162,6 +167,7 @@ public sealed class SseReceiver
                     var deliver = JsonSerializer.Deserialize<OutputDeliver>(data, LifemanJson.Options);
                     if (deliver is not null)
                     {
+                        _metrics?.RecordSseEvent();
                         if (OnDeliver is not null) await OnDeliver(deliver, ct).ConfigureAwait(false);
                         // Advance the pending cursor using the server-stamped
                         // delivered_at so a later reconnect via /api/outputs/pending

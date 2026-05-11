@@ -21,6 +21,8 @@ public sealed class ClientHostOptions
     /// Enable polling /api/system/client-updates/<platform>. DevHost
     /// turns this off — it's developer-built so update checks are noise.
     public bool EnableUpdateChecker { get; init; } = true;
+    /// On-disk outbox cap per CLIENT_DESIGN §"Local storage & offline".
+    public long OutboxMaxBytes { get; init; } = 100L * 1024 * 1024;
 }
 
 /// Wires the shared core pieces together. Each head supplies its
@@ -48,14 +50,17 @@ public sealed class ClientHostFactory
     {
         var outbox = new SqliteOutbox(options.OutboxPath);
         var health = new SqliteHealthStore(options.OutboxPath);
+        var metrics = new ClientRuntimeMetrics();
         var lifemanHttp = new LifemanHttpClient(http, config);
         var uploader = new Uploader(outbox, lifemanHttp, config,
             options: new UploaderOptions { IdlePollInterval = options.UploaderIdlePoll },
-            logger: loggerFactory.CreateLogger<Uploader>());
+            logger: loggerFactory.CreateLogger<Uploader>(),
+            metrics: metrics);
         uploader.SetNetworkProfile(isMetered: options.MeteredByDefault);
 
         var sse = new SseReceiver(lifemanHttp, config,
-            logger: loggerFactory.CreateLogger<SseReceiver>());
+            logger: loggerFactory.CreateLogger<SseReceiver>(),
+            metrics: metrics);
         var responses = new OutputResponseClient(lifemanHttp, config);
         var renderer = rendererFactory(responses);
 
@@ -76,9 +81,11 @@ public sealed class ClientHostFactory
         var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
             loggerFactory.CreateLogger<LifemanClientHost>(),
             health: health,
-            updates: updates);
+            updates: updates,
+            metrics: metrics,
+            outboxMaxBytes: options.OutboxMaxBytes);
 
-        return new ClientHostBundle(host, outbox, collectors.Count);
+        return new ClientHostBundle(host, outbox, health, metrics, collectors.Count);
     }
 }
 
@@ -94,10 +101,20 @@ public sealed class ClientHostBundle : IAsyncDisposable
     /// head's startup log line.
     public int CollectorCount { get; }
 
-    internal ClientHostBundle(LifemanClientHost host, SqliteOutbox outbox, int collectorCount)
+    public IHealthStore Health { get; }
+    public ClientRuntimeMetrics Metrics { get; }
+
+    internal ClientHostBundle(
+        LifemanClientHost host,
+        SqliteOutbox outbox,
+        IHealthStore health,
+        ClientRuntimeMetrics metrics,
+        int collectorCount)
     {
         Host = host;
         _outbox = outbox;
+        Health = health;
+        Metrics = metrics;
         CollectorCount = collectorCount;
     }
 

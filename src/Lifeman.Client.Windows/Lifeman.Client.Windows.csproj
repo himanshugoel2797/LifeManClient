@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe: no console window on autostart. CLI subcommands attach
+         to the parent console via Win32 AttachConsole — see
+         ConsoleAttach.cs. -->
+    <OutputType>WinExe</OutputType>
     <!-- 10.0.19041 is the floor for Microsoft.Toolkit.Uwp.Notifications
          (toast XML + unpackaged ToastNotifier) and the registry helpers
          used for autostart. -->
@@ -13,6 +16,11 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>lifeman-client</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- We use System.Drawing for the tray icon; suppress the
+         platform-compat warning since the project already declares
+         windows-only TFM. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

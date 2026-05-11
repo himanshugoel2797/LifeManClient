@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Lifeman.Client.Config;
 using Lifeman.Client.Contracts;
+using Lifeman.Client.Hosting;
 using Lifeman.Client.Outbox;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +34,7 @@ public sealed class Uploader
     private readonly IConfigStore _config;
     private readonly UploaderOptions _options;
     private readonly ILogger<Uploader> _logger;
+    private readonly ClientRuntimeMetrics? _metrics;
     private TimeSpan _currentBackoff;
     private int _batchHint;
 
@@ -41,13 +43,15 @@ public sealed class Uploader
         LifemanHttpClient client,
         IConfigStore config,
         UploaderOptions? options = null,
-        ILogger<Uploader>? logger = null)
+        ILogger<Uploader>? logger = null,
+        ClientRuntimeMetrics? metrics = null)
     {
         _outbox = outbox;
         _client = client;
         _config = config;
         _options = options ?? new UploaderOptions();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<Uploader>.Instance;
+        _metrics = metrics;
         _currentBackoff = _options.InitialBackoff;
         _batchHint = 1; // start gentle until we see the connection
     }
@@ -137,6 +141,7 @@ public sealed class Uploader
             }
         }
 
+        if (acked.Count > 0) _metrics?.RecordUpload(acked.Count);
         await _outbox.AckAsync(acked, ct).ConfigureAwait(false);
         if (permFailed.Count > 0)
             await _outbox.FailAsync(permFailed, "max attempts exceeded", permanent: true, ct).ConfigureAwait(false);
