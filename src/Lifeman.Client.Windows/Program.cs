@@ -128,6 +128,8 @@ async Task<int> RunAsync()
         new DesktopNetworkCollector(uploader),
         new DesktopSessionCollector(),
         new DesktopProcessListCollector(),
+        new DesktopNotificationCollector(),
+        new DesktopScreenCaptureCollector(),
     };
     var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
     var updates = new UpdateChecker(lifemanHttp, renderer, "windows", currentVersion,

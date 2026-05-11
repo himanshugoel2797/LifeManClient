@@ -8,6 +8,11 @@
        the closest fit for "uploading observations + listening for
        deliveries"; the lifeman agent is essentially a sync client. -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <!-- Screen capture (phone.screen_capture) runs through the same FGS;
+       Android 14+ requires the dedicated permission alongside the
+       mediaProjection foreground service type. The user still has to
+       approve the per-session MediaProjection consent dialog. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <!-- PACKAGE_USAGE_STATS is a "signature|appop" permission. Declaring
@@ -40,6 +45,28 @@
        (CLIENT_DESIGN §"Distribution") so the policy doesn't apply. -->
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
                    tools:ignore="QueryAllPackagesPermission" />
+  <!-- Health Connect read permissions. Each maps to one record type
+       polled by PhoneHealthConnectCollector. Granted via the Health
+       Connect app (system-level on Android 14+, standalone APK on
+       earlier versions) — NOT via the standard runtime-permission
+       dialog. The collector self-disables per-metric when its perm
+       isn't granted. TODO(MainActivity): add a "Open Health Connect"
+       button that fires HealthConnectClient.ActionHealthConnectSettings. -->
+  <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+  <uses-permission android:name="android.permission.health.READ_STEPS" />
+  <uses-permission android:name="android.permission.health.READ_SLEEP" />
+  <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+  <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+  <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+  <!-- Required so the Health Connect APK on Android 13- can resolve our
+       package, and so the system can route the rationale intent to us
+       on Android 14+. The provider package name is fixed by AndroidX. -->
+  <queries>
+    <package android:name="com.google.android.apps.healthdata" />
+    <intent>
+      <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+    </intent>
+  </queries>
 
   <application
     android:allowBackup="false"

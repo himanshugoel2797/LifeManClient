@@ -35,6 +35,7 @@ public sealed class MainActivity : Activity
     private KeystoreConfigStore? _config;
 
     private const int NotificationPermRequest = 0x10;
+    private const int MediaProjectionRequest = 0x30;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -151,6 +152,21 @@ public sealed class MainActivity : Activity
                 perms.Add(global::Android.Manifest.Permission.BluetoothConnect);
             ActivityCompat.RequestPermissions(this, perms.ToArray(), RuntimePermsRequest);
         });
+        AddPermissionRow(root, "Enable screen capture (MediaProjection)", () =>
+        {
+            // System-required: only an Activity can launch the consent
+            // intent, and the grant lasts only for the current process.
+            // We stash the result in MediaProjectionState so the FGS-side
+            // collector can pick it up.
+            var mpm = (global::Android.Media.Projection.MediaProjectionManager?)
+                GetSystemService(MediaProjectionService);
+            if (mpm is null)
+            {
+                global::Android.Util.Log.Warn("lifeman", "MediaProjectionManager unavailable");
+                return;
+            }
+            StartActivityForResult(mpm.CreateScreenCaptureIntent(), MediaProjectionRequest);
+        });
         AddPermissionRow(root, "Background location (Allow all the time)", () =>
         {
             if (Build.VERSION.SdkInt >= BuildVersionCodes.Q)
@@ -240,4 +256,26 @@ public sealed class MainActivity : Activity
     }
 
     private void SetStatus(string s) => RunOnUiThread(() => { if (_status is not null) _status.Text = s; });
+
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode != MediaProjectionRequest) return;
+        if (resultCode == Result.Ok && data is not null)
+        {
+            // Stash for the collector running inside LifemanService.
+            // The Intent itself is the consent token; MediaProjection
+            // grants don't survive process death so we never persist it.
+            MediaProjectionState.ConsentData = data;
+            MediaProjectionState.ConsentResultCode = (int)resultCode;
+            global::Android.Util.Log.Info("lifeman", "MediaProjection consent granted");
+            SetStatus("screen capture: enabled (this session)");
+        }
+        else
+        {
+            MediaProjectionState.Clear();
+            global::Android.Util.Log.Info("lifeman", $"MediaProjection consent declined: {resultCode}");
+            SetStatus("screen capture: declined");
+        }
+    }
 }

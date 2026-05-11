@@ -26,7 +26,7 @@ namespace Lifeman.Client.Android.Services;
 [Service(
     Enabled = true,
     Exported = false,
-    ForegroundServiceType = ForegroundService.TypeDataSync)]
+    ForegroundServiceType = ForegroundService.TypeDataSync | ForegroundService.TypeMediaProjection)]
 public sealed class LifemanService : Service
 {
     public const string ChannelId = "lifeman.service";
@@ -140,6 +140,20 @@ public sealed class LifemanService : Service
                 new PhoneCalendarCollector(ctx),            // needs READ_CALENDAR
                 new PhoneLocationCollector(ctx),            // needs ACCESS_FINE_LOCATION
                 new PhoneBluetoothAudioCollector(ctx),      // needs BLUETOOTH_CONNECT (S+)
+                new PhoneHealthConnectCollector(ctx, config), // needs Health Connect read perms (per-record-type)
+                // Self-disables until the user grants MediaProjection consent
+                // via MainActivity ("Enable screen capture"), which stashes
+                // the consent intent in MediaProjectionState.
+                new PhoneScreenCaptureCollector(ctx),
+                // Sensor surfaces. Each self-disables if the device lacks
+                // the hardware. Downsamplers cap emission to ~1–60/min.
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Accelerometer),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Gyroscope),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Magnetometer),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Light),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Pressure),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.AmbientTemperature),
+                new PhoneSensorCollector(ctx, PhoneSensorCollector.Kind.Proximity),
             };
 
             var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
