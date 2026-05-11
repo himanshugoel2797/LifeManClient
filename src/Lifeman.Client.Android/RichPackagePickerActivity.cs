@@ -63,6 +63,23 @@ public sealed class RichPackagePickerActivity : Activity
         searchWrap.AddView(_search);
         root.AddView(searchWrap);
 
+        // Bulk actions operate on the currently-filtered view, not the
+        // whole package list — that way "Select all" with a filter
+        // becomes the obvious "select every WhatsApp-related package"
+        // gesture without forcing the user to tap each row.
+        var bulkBar = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Horizontal };
+        bulkBar.SetPadding(48, 0, 48, 8);
+        var selectAll = new Button(this) { Text = "Select all" };
+        selectAll.Click += (_, _) => BulkSet(true);
+        var deselectAll = new Button(this) { Text = "Deselect all" };
+        deselectAll.Click += (_, _) => BulkSet(false);
+        var halfWeight = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        selectAll.LayoutParameters = halfWeight;
+        deselectAll.LayoutParameters = halfWeight;
+        bulkBar.AddView(selectAll);
+        bulkBar.AddView(deselectAll);
+        root.AddView(bulkBar);
+
         var scroll = new ScrollView(this);
         _listLayout = new LinearLayout(this) { Orientation = global::Android.Widget.Orientation.Vertical };
         _listLayout.SetPadding(48, 0, 48, 48);
@@ -123,14 +140,7 @@ public sealed class RichPackagePickerActivity : Activity
     {
         if (_listLayout is null) return;
         _listLayout.RemoveAllViews();
-        var filter = _search?.Text?.Trim() ?? string.Empty;
-
-        var rows = _apps.Where(a =>
-            string.IsNullOrEmpty(filter)
-            || a.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || a.Package.Contains(filter, StringComparison.OrdinalIgnoreCase));
-
-        foreach (var (pkg, label) in rows)
+        foreach (var (pkg, label) in VisibleRows())
         {
             var row = new CheckBox(this) { Checked = _selected.Contains(pkg) };
             row.SetTextColor(global::Android.Graphics.Color.Black);
@@ -143,6 +153,26 @@ public sealed class RichPackagePickerActivity : Activity
             };
             _listLayout.AddView(row);
         }
+    }
+
+    private void BulkSet(bool check)
+    {
+        foreach (var (pkg, _) in VisibleRows())
+        {
+            if (check) _selected.Add(pkg);
+            else _selected.Remove(pkg);
+        }
+        _ = PersistAsync();
+        RenderList();
+    }
+
+    private IEnumerable<(string Package, string Label)> VisibleRows()
+    {
+        var filter = _search?.Text?.Trim() ?? string.Empty;
+        return _apps.Where(a =>
+            string.IsNullOrEmpty(filter)
+            || a.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || a.Package.Contains(filter, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task PersistAsync()
