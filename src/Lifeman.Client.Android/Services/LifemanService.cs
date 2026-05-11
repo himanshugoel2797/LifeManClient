@@ -117,6 +117,24 @@ public sealed class LifemanService : Service
                 // the user opens the permission helpers in MainActivity.
                 collectorsFactory: uploader => new ICollector[]
                 {
+                    // Periodic permission grant-state audit (CLIENT_DESIGN.md
+                    // §Permission model). Emits client.observation events when
+                    // a critical permission goes missing or comes back.
+                    new PermissionAuditor(new[]
+                    {
+                        new PermissionProbe("phone.foreground_app", "PACKAGE_USAGE_STATS",
+                            () => (PhoneForegroundAppCollector.HasPermission(ctx), null)),
+                        new PermissionProbe("phone.notification", "notification_listener",
+                            () => (LifemanNotificationListener.IsEnabled(ctx), null)),
+                        new PermissionProbe("phone.media", "notification_listener",
+                            () => (LifemanNotificationListener.IsEnabled(ctx), null)),
+                        new PermissionProbe("phone.calendar", "READ_CALENDAR",
+                            () => (PhoneCalendarCollector.HasPermission(ctx), null)),
+                        new PermissionProbe("phone.location", "ACCESS_FINE_LOCATION",
+                            () => (PhoneLocationCollector.HasPermission(ctx), null)),
+                        new PermissionProbe("phone.bt_audio", "BLUETOOTH_CONNECT",
+                            () => (PhoneBluetoothAudioCollector.HasPermission(ctx), null)),
+                    }),
                     new PhoneBatteryCollector(ctx),
                     new PhoneScreenCollector(ctx),
                     new PhoneIdleCollector(ctx),

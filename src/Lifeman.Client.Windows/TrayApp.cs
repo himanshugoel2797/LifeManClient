@@ -65,6 +65,11 @@ public static class TrayApp
             rendererFactory: responses => new WindowsToastRenderer(responses),
             collectorsFactory: uploader => new ICollector[]
             {
+                new PermissionAuditor(new[]
+                {
+                    new PermissionProbe("desktop.notification", "UserNotificationListener access",
+                        DesktopNotificationCollector.GetAccessStatus),
+                }),
                 new DesktopPowerCollector(),
                 new DesktopActiveWindowCollector(),
                 new DesktopIdleCollector(),

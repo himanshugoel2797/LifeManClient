@@ -91,6 +91,23 @@ public sealed class DesktopNotificationCollector : ICollector
             yield return ev;
     }
 
+    /// Synchronous probe used by PermissionAuditor — read the cached
+    /// access status without prompting. Returns (granted, reason).
+    public static (bool granted, string? reason) GetAccessStatus()
+    {
+        try
+        {
+            var listener = UserNotificationListener.Current;
+            var status = listener.GetAccessStatus();
+            return (status == UserNotificationListenerAccessStatus.Allowed,
+                status == UserNotificationListenerAccessStatus.Allowed ? null : status.ToString());
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     private static async Task<(UserNotificationListener? Listener, string? Error)> TryInitListenerAsync()
     {
         UserNotificationListener listener;
