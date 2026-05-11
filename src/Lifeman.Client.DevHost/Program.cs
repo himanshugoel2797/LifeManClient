@@ -2,7 +2,6 @@ using Lifeman.Client.Collectors;
 using Lifeman.Client.Config;
 using Lifeman.Client.Contracts;
 using Lifeman.Client.DevHost;
-using Lifeman.Client.DevHost.Collectors;
 using Lifeman.Client.Hosting;
 using Lifeman.Client.Net;
 using Lifeman.Client.Outbox;

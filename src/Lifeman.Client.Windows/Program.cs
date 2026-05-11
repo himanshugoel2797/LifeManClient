@@ -116,6 +116,7 @@ async Task<int> RunAsync()
     // connectivity / metering changes — that's why it gets a reference.
     var collectors = new List<ICollector>
     {
+        new HeartbeatCollector(TimeSpan.FromMinutes(5)),
         new DesktopPowerCollector(),
         new DesktopActiveWindowCollector(),
         new DesktopIdleCollector(),

@@ -37,6 +37,8 @@ public sealed class LifemanService : Service
     private Task? _hostTask;
     private HttpClient? _http;
     private ILoggerFactory? _loggerFactory;
+    private static volatile bool s_running;
+    public static bool IsRunning(Context _) => s_running;
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -59,6 +61,7 @@ public sealed class LifemanService : Service
         if (_hostTask is not null) return StartCommandResult.Sticky;
 
         StartForeground(NotificationId, BuildPersistentNotification());
+        s_running = true;
         _cts = new CancellationTokenSource();
         _hostTask = Task.Run(() => RunHostAsync(_cts.Token));
         return StartCommandResult.Sticky;
@@ -108,6 +111,7 @@ public sealed class LifemanService : Service
 
             var collectors = new List<ICollector>
             {
+                new HeartbeatCollector(TimeSpan.FromMinutes(5)),
                 new PhoneBatteryCollector(ApplicationContext!),
             };
 
@@ -131,6 +135,7 @@ public sealed class LifemanService : Service
         try { _http?.Dispose(); } catch { }
         try { _loggerFactory?.Dispose(); } catch { }
         _cts = null; _hostTask = null; _http = null; _loggerFactory = null;
+        s_running = false;
         try { StopForeground(StopForegroundFlags.Remove); } catch { }
     }
 

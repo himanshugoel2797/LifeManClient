@@ -1,21 +1,18 @@
 using System.Text.Json;
-using Lifeman.Client.Collectors;
 
-namespace Lifeman.Client.DevHost.Collectors;
+namespace Lifeman.Client.Collectors;
 
-/// Cross-platform `client.heartbeat` — emits one event on startup, then one
-/// every interval. Useful for smoke-testing the upload loop without any
-/// platform-specific permission surface.
+/// `client.heartbeat` — emits one event on startup, then one every
+/// interval. Useful as a liveness signal: on a fully-quiet network /
+/// idle device, the heads otherwise produce no traffic, which makes
+/// "agent is alive" indistinguishable from "agent crashed silently".
 public sealed class HeartbeatCollector : ICollector
 {
     private readonly TimeSpan _interval;
+    public string Surface => "client.heartbeat";
 
     public HeartbeatCollector(TimeSpan? interval = null)
-    {
-        _interval = interval ?? TimeSpan.FromSeconds(30);
-    }
-
-    public string Surface => "client.heartbeat";
+        => _interval = interval ?? TimeSpan.FromMinutes(5);
 
     public async IAsyncEnumerable<CollectedEvent> StreamAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)

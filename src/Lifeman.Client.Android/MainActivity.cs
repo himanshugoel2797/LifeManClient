@@ -17,7 +17,8 @@ namespace Lifeman.Client.Android;
 ///   - Open via a `lifeman://pair?host=…&code=…` deep link → pair-and-go.
 ///   - Launch from the launcher → text field for the pair URL or
 ///     manual host/code entry, plus a Start/Stop service toggle.
-[Activity(Label = "@string/app_name", MainLauncher = true, Exported = true)]
+[Activity(Label = "@string/app_name", MainLauncher = true, Exported = true,
+    Theme = "@android:style/Theme.DeviceDefault.Light.NoActionBar")]
 [IntentFilter(new[] { Intent.ActionView },
     Categories = new[] { Intent.CategoryDefault, Intent.CategoryBrowsable },
     DataScheme = "lifeman",
@@ -57,28 +58,56 @@ public sealed class MainActivity : Activity
 
     private void BuildUi()
     {
+        var outer = new LinearLayout(this)
+        {
+            Orientation = global::Android.Widget.Orientation.Vertical,
+        };
+        outer.SetBackgroundColor(global::Android.Graphics.Color.White);
+        outer.SetFitsSystemWindows(true);
+
+        // Custom header bar in lieu of the system action bar — gives us
+        // predictable layout math instead of fighting the theme's
+        // overlay / inset behavior.
+        var header = new TextView(this) { Text = "Lifeman", TextSize = 22f };
+        header.SetTextColor(global::Android.Graphics.Color.White);
+        header.SetBackgroundColor(global::Android.Graphics.Color.Argb(0xff, 0x15, 0x18, 0x1c));
+        header.SetPadding(48, 64, 48, 32);
+        outer.AddView(header);
+
         var scroll = new ScrollView(this);
         var root = new LinearLayout(this)
         {
             Orientation = global::Android.Widget.Orientation.Vertical,
         };
-        // Slightly generous top padding so the status field clears the
-        // action bar even before any window-insets handling.
-        root.SetPadding(48, 32, 48, 48);
+        root.SetPadding(48, 48, 48, 48);
+        root.SetBackgroundColor(global::Android.Graphics.Color.White);
         scroll.AddView(root);
+        outer.AddView(scroll);
+
+        var statusHeader = new TextView(this) { Text = "Status", TextSize = 12f };
+        statusHeader.SetTextColor(global::Android.Graphics.Color.Argb(0xff, 0x66, 0x66, 0x66));
+        statusHeader.SetPadding(0, 0, 0, 4);
+        root.AddView(statusHeader);
 
         _status = new TextView(this)
         {
             TextSize = 14f,
             Text = "…",
         };
+        _status.SetTextColor(global::Android.Graphics.Color.Black);
+        _status.SetTypeface(global::Android.Graphics.Typeface.Monospace, global::Android.Graphics.TypefaceStyle.Normal);
+        _status.SetPadding(16, 12, 16, 12);
+        _status.SetBackgroundColor(global::Android.Graphics.Color.Argb(0xff, 0xf2, 0xf2, 0xf2));
         root.AddView(_status);
 
         var label = new TextView(this) { Text = "Pair URL or code", TextSize = 14f };
+        label.SetTextColor(global::Android.Graphics.Color.Black);
         label.SetPadding(0, 48, 0, 8);
         root.AddView(label);
 
         _input = new EditText(this) { Hint = "lifeman://pair?host=…&code=…" };
+        _input.SetTextColor(global::Android.Graphics.Color.Black);
+        _input.SetHintTextColor(global::Android.Graphics.Color.Argb(0xff, 0x99, 0x99, 0x99));
         root.AddView(_input);
 
         _pairBtn = new Button(this) { Text = "Pair" };
@@ -90,14 +119,14 @@ public sealed class MainActivity : Activity
         root.AddView(_pairBtn);
 
         _startBtn = new Button(this) { Text = "Start agent" };
-        _startBtn.Click += (_, _) => { LifemanService.Start(this); _ = RefreshStatusAsync(); };
+        _startBtn.Click += async (_, _) => { LifemanService.Start(this); await Task.Delay(300); await RefreshStatusAsync(); };
         root.AddView(_startBtn);
 
         _stopBtn = new Button(this) { Text = "Stop agent" };
-        _stopBtn.Click += (_, _) => { LifemanService.Stop(this); _ = RefreshStatusAsync(); };
+        _stopBtn.Click += async (_, _) => { LifemanService.Stop(this); await Task.Delay(300); await RefreshStatusAsync(); };
         root.AddView(_stopBtn);
 
-        SetContentView(scroll);
+        SetContentView(outer);
     }
 
     private void MaybeRequestNotificationPermission()
@@ -152,7 +181,8 @@ public sealed class MainActivity : Activity
         var server = await _config.GetAsync(ConfigKeys.ServerBaseUrl) ?? "(unpaired)";
         var deviceId = await _config.GetAsync(ConfigKeys.DeviceId) ?? "-";
         var name = await _config.GetAsync(ConfigKeys.DeviceName) ?? "-";
-        SetStatus($"server: {server}\ndevice_id: {deviceId}\nname: {name}");
+        var running = Services.LifemanService.IsRunning(this) ? "running" : "stopped";
+        SetStatus($"server:    {server}\ndevice_id: {deviceId}\nname:      {name}\nagent:     {running}");
     }
 
     private void SetStatus(string s) => RunOnUiThread(() => { if (_status is not null) _status.Text = s; });
