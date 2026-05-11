@@ -100,6 +100,7 @@ async Task<int> RunAsync()
         return 1;
     }
     await using var outbox = new SqliteOutbox(Path.Combine(stateDir, "outbox.db"));
+    RuntimeState.CurrentOutbox = outbox;
     var lifemanHttp = new LifemanHttpClient(http, config);
     var uploader = new Uploader(outbox, lifemanHttp, config,
         options: new UploaderOptions { IdlePollInterval = TimeSpan.FromSeconds(2) },

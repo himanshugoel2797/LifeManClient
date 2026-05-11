@@ -3,8 +3,10 @@ using Android.App;
 using Android.Content;
 using Android.OS;
 using AndroidX.Core.App;
+using Lifeman.Client.Android.Services;
 using Lifeman.Client.Contracts;
 using Lifeman.Client.Net;
+using Lifeman.Client.Outbox;
 using Lifeman.Client.Renderers;
 
 namespace Lifeman.Client.Android.Renderers;
@@ -21,6 +23,30 @@ public sealed class AndroidNotificationRenderer : IRenderer
     private readonly Context _ctx;
     private readonly ConcurrentDictionary<string, int> _ids = new();
     private static int _idSeed = 1000;
+
+    // The OS fires the delete intent both on user-dismiss AND on
+    // programmatic NotificationManager.Cancel — these sets let
+    // DismissReceiver tell them apart and skip emitting redundant
+    // dismissal events for our own cancels (programmatic) or for
+    // notifications the user already responded to via an action button.
+    private static readonly HashSet<string> s_programmaticDismisses = new();
+    private static readonly HashSet<string> s_actionResponded = new();
+    private static readonly object s_setLock = new();
+
+    public static bool ConsumeProgrammaticDismiss(string outputId)
+    {
+        lock (s_setLock) return s_programmaticDismisses.Remove(outputId);
+    }
+
+    public static bool ConsumeActionResponded(string outputId)
+    {
+        lock (s_setLock) return s_actionResponded.Remove(outputId);
+    }
+
+    public static void MarkActionResponded(string outputId)
+    {
+        lock (s_setLock) s_actionResponded.Add(outputId);
+    }
 
     public AndroidNotificationRenderer(Context ctx)
     {
@@ -61,6 +87,20 @@ public sealed class AndroidNotificationRenderer : IRenderer
             builder.AddAction(0, action.Label, pending);
         }
 
+        // Delete intent fires when the user swipes the notification
+        // away, taps "Clear all", or taps it (when autoCancel=true).
+        // It also fires on our own Cancel, which we filter out via
+        // s_programmaticDismisses.
+        var dismissIntent = new Intent(_ctx, typeof(DismissReceiver))
+            .SetAction(DismissReceiver.IntentAction)
+            .PutExtra(DismissReceiver.ExtraOutputId, deliver.OutputId);
+        var dismissPending = PendingIntent.GetBroadcast(
+            _ctx,
+            HashCode.Combine(deliver.OutputId, "dismiss"),
+            dismissIntent,
+            PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+        builder.SetDeleteIntent(dismissPending);
+
         var id = _ids.GetOrAdd(deliver.OutputId, _ => Interlocked.Increment(ref _idSeed));
         NotificationManagerCompat.From(_ctx).Notify(id, builder.Build()!);
         return Task.CompletedTask;
@@ -69,7 +109,12 @@ public sealed class AndroidNotificationRenderer : IRenderer
     public Task DismissAsync(string outputId, CancellationToken ct)
     {
         if (_ids.TryRemove(outputId, out var id))
+        {
+            // Mark before cancel so the delete-intent callback knows
+            // this dismissal originated from the kernel, not the user.
+            lock (s_setLock) s_programmaticDismisses.Add(outputId);
             NotificationManagerCompat.From(_ctx).Cancel(id);
+        }
         return Task.CompletedTask;
     }
 }
@@ -95,6 +140,11 @@ public sealed class ActionResponseReceiver : BroadcastReceiver
 
         // The system holds a wakelock on us for ~10s during OnReceive;
         // that's plenty for a single small POST. Fire-and-forget.
+        // Mark before the dismiss intent fires (Android dismisses the
+        // notification after an action click on autoCancel=true), so
+        // we don't also emit a "dismissed" event for the same output.
+        AndroidNotificationRenderer.MarkActionResponded(outputId);
+
         var pendingResult = GoAsync();
         _ = Task.Run(async () =>
         {
@@ -114,6 +164,36 @@ public sealed class ActionResponseReceiver : BroadcastReceiver
             {
                 try { pendingResult?.Finish(); } catch { }
             }
+        });
+    }
+}
+
+/// Fires when the user dismisses one of our notifications (swipe,
+/// "Clear all", or tap-with-autoCancel). Translates that into a
+/// `client.output_event` so the kernel can stop tracking the output
+/// as "still up." Skipped when we triggered the dismissal ourselves
+/// (kernel sent output.cancel) or when the user already responded via
+/// an action button.
+[BroadcastReceiver(Enabled = true, Exported = false)]
+public sealed class DismissReceiver : BroadcastReceiver
+{
+    public const string IntentAction = "dev.lifeman.client.OUTPUT_DISMISS";
+    public const string ExtraOutputId = "output_id";
+
+    public override void OnReceive(Context? context, Intent? intent)
+    {
+        var outputId = intent?.GetStringExtra(ExtraOutputId);
+        if (string.IsNullOrEmpty(outputId)) return;
+
+        if (AndroidNotificationRenderer.ConsumeProgrammaticDismiss(outputId)) return;
+        if (AndroidNotificationRenderer.ConsumeActionResponded(outputId)) return;
+
+        var pending = GoAsync();
+        _ = Task.Run(async () =>
+        {
+            try { await ClientEvents.EnqueueOutputEventAsync(LifemanService.CurrentOutbox, "dismissed", outputId).ConfigureAwait(false); }
+            catch (Exception ex) { global::Android.Util.Log.Warn("lifeman", $"dismiss enqueue failed: {ex.Message}"); }
+            finally { try { pending?.Finish(); } catch { } }
         });
     }
 }

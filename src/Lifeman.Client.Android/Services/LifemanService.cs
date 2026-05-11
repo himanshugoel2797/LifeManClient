@@ -40,6 +40,11 @@ public sealed class LifemanService : Service
     private static volatile bool s_running;
     public static bool IsRunning(Context _) => s_running;
 
+    /// Live outbox reference while the host loop is running. BroadcastReceivers
+    /// fired by toast / notification dismiss intents use this to enqueue
+    /// `client.output_event` side-channel events without re-opening SQLite.
+    public static IOutbox? CurrentOutbox { get; private set; }
+
     public override IBinder? OnBind(Intent? intent) => null;
 
     public override void OnCreate()
@@ -97,6 +102,7 @@ public sealed class LifemanService : Service
             _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: creating outbox");
             await using var outbox = new SqliteOutbox(System.IO.Path.Combine(stateDir, "outbox.db"));
+            CurrentOutbox = outbox;
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: wiring host");
             var lifemanHttp = new LifemanHttpClient(_http, config);
             var uploader = new Uploader(outbox, lifemanHttp, config,
@@ -124,11 +130,12 @@ public sealed class LifemanService : Service
                 new PhoneHeadphonesCollector(ctx),
                 new PhoneAlarmsCollector(ctx),
                 new PhoneLocaleCollector(ctx),
-                new PhoneForegroundAppCollector(ctx),     // needs PACKAGE_USAGE_STATS
-                new PhoneNotificationCollector(ctx),      // needs Notification access
-                new PhoneMediaCollector(ctx),             // needs Notification access
-                new PhoneCalendarCollector(ctx),          // needs READ_CALENDAR
-                new PhoneLocationCollector(ctx),          // needs ACCESS_FINE_LOCATION
+                new PhoneForegroundAppCollector(ctx),       // needs PACKAGE_USAGE_STATS
+                new PhoneNotificationCollector(ctx, config),// needs Notification access
+                new PhoneMediaCollector(ctx),               // needs Notification access
+                new PhoneCalendarCollector(ctx),            // needs READ_CALENDAR
+                new PhoneLocationCollector(ctx),            // needs ACCESS_FINE_LOCATION
+                new PhoneBluetoothAudioCollector(ctx),      // needs BLUETOOTH_CONNECT (S+)
             };
 
             await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
@@ -151,6 +158,7 @@ public sealed class LifemanService : Service
         try { _http?.Dispose(); } catch { }
         try { _loggerFactory?.Dispose(); } catch { }
         _cts = null; _hostTask = null; _http = null; _loggerFactory = null;
+        CurrentOutbox = null;
         s_running = false;
         try { StopForeground(StopForegroundFlags.Remove); } catch { }
     }

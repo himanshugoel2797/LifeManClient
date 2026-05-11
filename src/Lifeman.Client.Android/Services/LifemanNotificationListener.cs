@@ -57,6 +57,10 @@ public sealed class LifemanNotificationListener : NotificationListenerService
 /// content) that the kernel can opt into per-app later if it really
 /// wants. First-cut payload is "which app made noise, when, and was
 /// it ongoing / clearable" — enough for routine recognition.
+/// Richer than the kernel will see by default: title / text / subText /
+/// ticker live on the listener-side event so PhoneNotificationCollector
+/// can choose, per-package, whether to forward them. Default policy is
+/// metadata-only.
 public sealed record NotificationEvent(
     bool Posted,
     string Package,
@@ -66,11 +70,16 @@ public sealed record NotificationEvent(
     string? ChannelId,
     long PostTimeMs,
     bool Ongoing,
-    bool Clearable)
+    bool Clearable,
+    string? Title,
+    string? Text,
+    string? SubText,
+    string? Ticker)
 {
     public static NotificationEvent From(StatusBarNotification sbn, bool posted)
     {
         var n = sbn.Notification;
+        var extras = n?.Extras;
         return new NotificationEvent(
             Posted: posted,
             Package: sbn.PackageName ?? "?",
@@ -80,6 +89,11 @@ public sealed record NotificationEvent(
             ChannelId: n?.ChannelId,
             PostTimeMs: sbn.PostTime,
             Ongoing: sbn.IsOngoing,
-            Clearable: sbn.IsClearable);
+            Clearable: sbn.IsClearable,
+            Title: extras?.GetCharSequence("android.title")?.ToString(),
+            Text: extras?.GetCharSequence("android.text")?.ToString()
+                  ?? extras?.GetCharSequence("android.bigText")?.ToString(),
+            SubText: extras?.GetCharSequence("android.subText")?.ToString(),
+            Ticker: n?.TickerText?.ToString());
     }
 }

@@ -139,13 +139,18 @@ public sealed class MainActivity : Activity
             StartActivity(new Intent(Settings.ActionUsageAccessSettings)));
         AddPermissionRow(root, "Notification access (notifications, media)", () =>
             StartActivity(new Intent(Settings.ActionNotificationListenerSettings)));
-        AddPermissionRow(root, "Calendar + location (runtime)", () =>
-            ActivityCompat.RequestPermissions(this, new[]
+        AddPermissionRow(root, "Calendar + location + bluetooth (runtime)", () =>
+        {
+            var perms = new List<string>
             {
                 global::Android.Manifest.Permission.ReadCalendar,
                 global::Android.Manifest.Permission.AccessFineLocation,
                 global::Android.Manifest.Permission.AccessCoarseLocation,
-            }, RuntimePermsRequest));
+            };
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.S)
+                perms.Add(global::Android.Manifest.Permission.BluetoothConnect);
+            ActivityCompat.RequestPermissions(this, perms.ToArray(), RuntimePermsRequest);
+        });
         AddPermissionRow(root, "Background location (Allow all the time)", () =>
         {
             if (Build.VERSION.SdkInt >= BuildVersionCodes.Q)

@@ -19,4 +19,11 @@ public static class ConfigKeys
     public const string DeviceName = "device.name";
     public const string SseCursor = "sse.cursor";
     public const string PendingCursor = "pending.cursor";
+
+    /// Comma-separated list of Android package names whose notifications
+    /// should be enriched with title / text / subText / ticker on
+    /// upload. Empty (default) → metadata-only for every package.
+    /// Match is "exact OR prefix-match", so `com.google.` covers all
+    /// Google apps without listing them individually.
+    public const string NotificationRichPackages = "phone.notification.rich_packages";
 }

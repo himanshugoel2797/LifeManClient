@@ -76,13 +76,16 @@ public sealed class PhoneLocationCollector : ICollector
         var listener = new PassiveListener(loc => PushLocation("passive_update", loc));
         try
         {
-            // Minimum time 5min, minimum distance 50m — even on passive we
-            // throttle so a chatty foreground app (Maps) doesn't bury us.
+            // Minimum time 5min, minimum distance 50m — even on passive
+            // we throttle so a chatty foreground app (Maps) doesn't
+            // bury us. Explicit MainLooper because the collector runs
+            // on a worker thread without a Looper of its own.
             lm.RequestLocationUpdates(
                 LocationManager.PassiveProvider!,
-                minTimeMs: (long)TimeSpan.FromMinutes(5).TotalMilliseconds,
-                minDistanceM: 50,
-                listener);
+                (long)TimeSpan.FromMinutes(5).TotalMilliseconds,
+                50f,
+                listener,
+                Looper.MainLooper!);
         }
         catch (Exception ex)
         {

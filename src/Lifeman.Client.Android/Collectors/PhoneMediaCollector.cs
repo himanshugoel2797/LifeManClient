@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Android.Content;
 using Android.Media;
 using Android.Media.Session;
+using Android.OS;
 using Lifeman.Client.Android.Services;
 using Lifeman.Client.Collectors;
 
@@ -81,7 +82,12 @@ public sealed class PhoneMediaCollector : ICollector
         }
 
         var listener = new SessionsChangedListener(RefreshSessions);
-        msm.AddOnActiveSessionsChangedListener(listener, component);
+        // Callbacks must dispatch on a thread with a Looper; the
+        // collector runs on a plain worker thread, so pin to the main
+        // looper. The work the callback does is just channel.Writer.TryWrite
+        // — cheap enough that running on the main thread is fine.
+        var mainHandler = new Handler(Looper.MainLooper!);
+        msm.AddOnActiveSessionsChangedListener(listener, component, mainHandler);
         RefreshSessions();
 
         using var reg = ct.Register(() =>

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using Lifeman.Client.Contracts;
 using Lifeman.Client.Net;
+using Lifeman.Client.Outbox;
 using Lifeman.Client.Renderers;
 using Microsoft.Toolkit.Uwp.Notifications;
 using Windows.UI.Notifications;
@@ -24,6 +25,11 @@ public sealed class WindowsToastRenderer : IRenderer
 
     // Track the toast tag for each delivered output so we can dismiss on cancel.
     private readonly ConcurrentDictionary<string, string> _tags = new();
+
+    // Toast.Dismissed fires for both user-dismissal AND our own
+    // History.Remove call. This set lets us filter out the latter.
+    private readonly ConcurrentDictionary<string, byte> _programmaticDismisses = new();
+    private readonly ConcurrentDictionary<string, byte> _actionResponded = new();
 
     public WindowsToastRenderer(OutputResponseClient responses)
     {
@@ -56,12 +62,26 @@ public sealed class WindowsToastRenderer : IRenderer
         // Use the output_id as both Tag and Group so cancel can dismiss
         // by these identifiers without remembering the toast object.
         var tag = ShortTag(deliver.OutputId);
-        _tags[deliver.OutputId] = tag;
+        var outputId = deliver.OutputId;
+        _tags[outputId] = tag;
         builder.Show(toast =>
         {
             toast.Tag = tag;
             toast.Group = "lifeman";
             if (deliver.ExpiresAt is { } exp) toast.ExpirationTime = exp;
+            toast.Dismissed += (s, e) =>
+            {
+                if (_programmaticDismisses.TryRemove(outputId, out _)) return;
+                if (_actionResponded.TryRemove(outputId, out _)) return;
+                // ToastDismissalReason: UserCanceled / TimedOut / ApplicationHidden
+                var trigger = e.Reason switch
+                {
+                    ToastDismissalReason.UserCanceled => "dismissed",
+                    ToastDismissalReason.TimedOut => "expired",
+                    _ => "dismissed",
+                };
+                _ = ClientEvents.EnqueueOutputEventAsync(RuntimeState.CurrentOutbox, trigger, outputId);
+            };
         });
         return Task.CompletedTask;
     }
@@ -70,6 +90,7 @@ public sealed class WindowsToastRenderer : IRenderer
     {
         if (_tags.TryRemove(outputId, out var tag))
         {
+            _programmaticDismisses[outputId] = 1;
             try { ToastNotificationManagerCompat.History.Remove(tag, "lifeman"); }
             catch { /* nothing we can do; toast may already be gone */ }
         }
@@ -83,6 +104,8 @@ public sealed class WindowsToastRenderer : IRenderer
         var outputId = args.Get("outputId");
         var actionLabel = args.Get("action");
         if (string.IsNullOrEmpty(outputId) || string.IsNullOrEmpty(actionLabel)) return;
+
+        _actionResponded[outputId] = 1;
 
         // Fire and forget — the renderer doesn't own a cancellation
         // token from the host loop here (toast activations can fire
