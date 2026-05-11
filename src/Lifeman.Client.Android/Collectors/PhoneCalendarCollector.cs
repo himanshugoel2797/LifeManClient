@@ -35,11 +35,16 @@ public sealed class PhoneCalendarCollector : ICollector
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.calendar: READ_CALENDAR not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "READ_CALENDAR not granted");
             yield break;
         }
 
         var resolver = _ctx.ContentResolver;
-        if (resolver is null) yield break;
+        if (resolver is null)
+        {
+            yield return ClientObservations.CollectorDisabled(Surface, "ContentResolver unavailable");
+            yield break;
+        }
 
         var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
         {

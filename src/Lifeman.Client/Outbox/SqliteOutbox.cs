@@ -37,6 +37,11 @@ public sealed class SqliteOutbox : IOutbox
                 last_error   TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_outbox_emitted ON outbox(emitted_at);
+            CREATE TABLE IF NOT EXISTS received (
+                output_id    TEXT PRIMARY KEY,
+                received_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_received_at ON received(received_at);
             """;
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
@@ -193,6 +198,46 @@ public sealed class SqliteOutbox : IOutbox
             vac.CommandText = "VACUUM;";
             await vac.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             return drop;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async ValueTask<bool> TryMarkReceivedAsync(string outputId, DateTimeOffset receivedAt, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var cmd = Conn.CreateCommand();
+            // INSERT OR IGNORE — `changes()` is 1 for a fresh insert, 0 if the
+            // PK already existed. That's our "have we surfaced this before?" answer.
+            cmd.CommandText = """
+                INSERT OR IGNORE INTO received (output_id, received_at) VALUES ($id, $at);
+                SELECT changes();
+                """;
+            cmd.Parameters.AddWithValue("$id", outputId);
+            cmd.Parameters.AddWithValue("$at", receivedAt.ToString("O"));
+            var changed = (long)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+            return changed == 1;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async ValueTask<int> TrimReceivedAsync(TimeSpan retain, CancellationToken ct = default)
+    {
+        var cutoff = DateTimeOffset.UtcNow - retain;
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var cmd = Conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM received WHERE received_at < $cut;";
+            cmd.Parameters.AddWithValue("$cut", cutoff.ToString("O"));
+            return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         finally
         {

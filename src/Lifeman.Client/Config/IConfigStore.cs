@@ -17,8 +17,13 @@ public static class ConfigKeys
     public const string DeviceToken = "device.token";
     public const string DeviceId = "device.id";
     public const string DeviceName = "device.name";
-    public const string SseCursor = "sse.cursor";
     public const string PendingCursor = "pending.cursor";
+
+    /// Set to "1" by Uploader/SseReceiver when the kernel returns 401
+    /// (token revoked or evicted). Cleared by PairingClient on a
+    /// successful re-pair. Heads observe this to switch into a
+    /// re-pair UI rather than churning silently against a dead token.
+    public const string RepairRequired = "auth.repair_required";
 
     /// Comma-separated list of Android package names whose notifications
     /// should be enriched with title / text / subText / ticker on

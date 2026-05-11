@@ -160,14 +160,25 @@ public sealed class Uploader
         if (status == HttpStatusCode.Unauthorized)
         {
             _logger.LogError("uploader received 401 — device token may be revoked. Pause and re-pair.");
+            await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);
             await _outbox.FailAsync(ids, error, permanent: false, ct).ConfigureAwait(false);
             await Task.Delay(_options.MaxBackoff, ct).ConfigureAwait(false);
             return;
         }
 
         // 413 → server batch cap exceeded. Halve the batch hint and retry next pass.
+        // If we're already at one row per batch, the single payload itself is
+        // oversized — no future retry will succeed, so drop it permanently
+        // rather than spinning forever on the same poison row.
         if (status == HttpStatusCode.RequestEntityTooLarge)
         {
+            if (_batchHint <= 1)
+            {
+                _logger.LogError("dropping outbox entry {Id} (surface {Surface}): single payload exceeds server cap",
+                    batch[0].Id, batch[0].Surface);
+                await _outbox.FailAsync(ids, "single payload exceeds server batch cap", permanent: true, ct).ConfigureAwait(false);
+                return;
+            }
             _batchHint = Math.Max(1, _batchHint / 2);
             _logger.LogWarning("batch too large — dropping batch hint to {Hint}", _batchHint);
             await _outbox.FailAsync(ids, error, permanent: false, ct).ConfigureAwait(false);

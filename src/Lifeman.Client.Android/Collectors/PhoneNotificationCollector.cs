@@ -36,6 +36,7 @@ public sealed class PhoneNotificationCollector : ICollector
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.notification: notification access not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "Notification access not granted");
             yield break;
         }
 

@@ -53,11 +53,16 @@ public sealed class PhoneForegroundAppCollector : ICollector
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var usm = (UsageStatsManager?)_ctx.GetSystemService(Context.UsageStatsService);
-        if (usm is null) yield break;
+        if (usm is null)
+        {
+            yield return ClientObservations.CollectorDisabled(Surface, "UsageStatsManager unavailable");
+            yield break;
+        }
         if (!HasPermission(_ctx))
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.foreground_app: PACKAGE_USAGE_STATS not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "PACKAGE_USAGE_STATS not granted");
             yield break;
         }
 

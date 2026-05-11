@@ -42,11 +42,16 @@ public sealed class PhoneLocationCollector : ICollector
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.location: location permission not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "ACCESS_FINE/COARSE_LOCATION not granted");
             yield break;
         }
 
         var lm = (LocationManager?)_ctx.GetSystemService(Context.LocationService);
-        if (lm is null) yield break;
+        if (lm is null)
+        {
+            yield return ClientObservations.CollectorDisabled(Surface, "LocationManager unavailable");
+            yield break;
+        }
 
         var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
         {
@@ -134,6 +139,9 @@ public sealed class PhoneLocationCollector : ICollector
         {
             try { lm.RemoveUpdates(listener); } catch { }
             try { handlerThread.QuitSafely(); } catch { }
+            // Bound the join so a wedged native callback can't block
+            // shutdown indefinitely. 1s is plenty for the looper to drain.
+            try { handlerThread.Join(1000); } catch { }
             channel.Writer.TryComplete();
         });
 

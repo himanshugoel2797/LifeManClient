@@ -32,11 +32,16 @@ public sealed class PhoneMediaCollector : ICollector
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.media: notification access not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "Notification access not granted");
             yield break;
         }
 
         var msm = (MediaSessionManager?)_ctx.GetSystemService(Context.MediaSessionService);
-        if (msm is null) yield break;
+        if (msm is null)
+        {
+            yield return ClientObservations.CollectorDisabled(Surface, "MediaSessionManager unavailable");
+            yield break;
+        }
         var component = LifemanNotificationListener.ComponentName(_ctx);
 
         var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions

@@ -76,7 +76,10 @@ public sealed class SseReceiver
         req.Headers.Accept.ParseAdd("text/event-stream");
         using var resp = await _client.Raw.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);
             throw new UnauthorizedAccessException("SSE returned 401 — re-pair required.");
+        }
         resp.EnsureSuccessStatusCode();
 
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -133,7 +136,13 @@ public sealed class SseReceiver
                     if (deliver is not null)
                     {
                         if (OnDeliver is not null) await OnDeliver(deliver, ct).ConfigureAwait(false);
-                        await UpdateCursorAsync(ConfigKeys.PendingCursor, deliver.ExpiresAt, ct).ConfigureAwait(false);
+                        // Advance the pending cursor so a later reconnect via
+                        // /api/outputs/pending only re-fetches events the
+                        // server delivered after this one. Best-effort: the
+                        // deliver payload has no `delivered_at`, so we use
+                        // local UtcNow — see docs/PARENT_REPO_REQUESTS.md.
+                        await _config.SetAsync(ConfigKeys.PendingCursor,
+                            DateTimeOffset.UtcNow.ToString("O"), ct).ConfigureAwait(false);
                     }
                     break;
                 case "output.cancel":
@@ -171,7 +180,10 @@ public sealed class SseReceiver
         using var req = await _client.CreateAuthedRequestAsync(HttpMethod.Get, path, ct).ConfigureAwait(false);
         using var resp = await _client.Raw.SendAsync(req, ct).ConfigureAwait(false);
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);
             throw new UnauthorizedAccessException("pending fetch returned 401 — re-pair required.");
+        }
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadFromJsonAsync<PendingOutputsResponse>(LifemanJson.Options, ct).ConfigureAwait(false);
         if (body is null) return;
@@ -184,9 +196,4 @@ public sealed class SseReceiver
             await _config.SetAsync(ConfigKeys.PendingCursor, body.Cursor, ct).ConfigureAwait(false);
     }
 
-    private async Task UpdateCursorAsync(string key, DateTimeOffset? value, CancellationToken ct)
-    {
-        if (value is null) return;
-        await _config.SetAsync(key, value.Value.ToString("O"), ct).ConfigureAwait(false);
-    }
 }

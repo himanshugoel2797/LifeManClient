@@ -38,6 +38,8 @@ public sealed class PairingClient
         await _config.SetAsync(ConfigKeys.DeviceId, pair.DeviceId, ct).ConfigureAwait(false);
         await _config.SetAsync(ConfigKeys.DeviceName, pair.Name, ct).ConfigureAwait(false);
         await _config.SetAsync(ConfigKeys.DeviceToken, pair.Token, ct).ConfigureAwait(false);
+        // Clear any stale 401 flag from a previous token now that we hold a fresh one.
+        await _config.DeleteAsync(ConfigKeys.RepairRequired, ct).ConfigureAwait(false);
         return pair;
     }
 

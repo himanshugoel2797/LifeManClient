@@ -27,4 +27,16 @@ public interface IOutbox : IAsyncDisposable
     /// number dropped. Critical events (urgency=urgent) are kept regardless
     /// once that concept is plumbed through; v1 drops oldest first.
     ValueTask<int> TrimAsync(long maxBytes, CancellationToken ct = default);
+
+    /// Atomically record that we've surfaced an output, so SSE-replay
+    /// after reconnect doesn't re-fire the same notification. Returns
+    /// `true` if this was a new ID (caller should render), `false` if
+    /// it was already seen (caller should skip). Entries older than the
+    /// in-memory replay window are pruned by `TrimReceivedAsync`.
+    ValueTask<bool> TryMarkReceivedAsync(string outputId, DateTimeOffset receivedAt, CancellationToken ct = default);
+
+    /// Drop received-output records older than `retain`. Bounded so the
+    /// dedup table doesn't grow forever; 30 days easily covers any
+    /// realistic SSE-replay or pending-fetch overlap.
+    ValueTask<int> TrimReceivedAsync(TimeSpan retain, CancellationToken ct = default);
 }

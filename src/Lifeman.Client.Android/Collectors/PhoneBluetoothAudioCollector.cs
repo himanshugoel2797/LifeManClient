@@ -39,6 +39,7 @@ public sealed class PhoneBluetoothAudioCollector : ICollector
         {
             global::Android.Util.Log.Info("lifeman",
                 "phone.bt_audio: BLUETOOTH_CONNECT not granted, collector idle");
+            yield return ClientObservations.CollectorDisabled(Surface, "BLUETOOTH_CONNECT not granted");
             yield break;
         }
 
