@@ -109,10 +109,18 @@ public sealed class LifemanService : Service
             var responses = new OutputResponseClient(lifemanHttp, config);
             var renderer = new AndroidNotificationRenderer(ApplicationContext!);
 
+            var ctx = ApplicationContext!;
             var collectors = new List<ICollector>
             {
                 new HeartbeatCollector(TimeSpan.FromMinutes(5)),
-                new PhoneBatteryCollector(ApplicationContext!),
+                new PhoneBatteryCollector(ctx),
+                new PhoneScreenCollector(ctx),
+                new PhoneIdleCollector(ctx),
+                new PhoneNetworkCollector(ctx, uploader),
+                new PhoneHeadphonesCollector(ctx),
+                // Foreground-app collector self-disables if
+                // PACKAGE_USAGE_STATS isn't granted (no-op generator).
+                new PhoneForegroundAppCollector(ctx),
             };
 
             await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
