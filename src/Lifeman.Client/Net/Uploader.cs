@@ -97,10 +97,8 @@ public sealed class Uploader
         var payload = new InputBatchRequest(
             batch.Select(e => e.ToInputEvent(source)).ToArray());
 
-        using var req = await _client.CreateAuthedRequestAsync(HttpMethod.Post, "api/inputs/batch", ct).ConfigureAwait(false);
-        req.Content = JsonContent.Create(payload, options: LifemanJson.Options);
-
-        using var resp = await _client.Raw.SendAsync(req, ct).ConfigureAwait(false);
+        using var content = JsonContent.Create(payload, options: LifemanJson.Options);
+        using var resp = await _client.SendAsync(HttpMethod.Post, "api/inputs/batch", content, ct: ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
         {
             await HandleBatchFailureAsync(batch, resp, ct).ConfigureAwait(false);

@@ -105,7 +105,7 @@ public sealed class LifemanService : Service
                 .AddProvider(new AndroidLogcatLoggerProvider())
                 .SetMinimumLevel(LogLevel.Information));
 
-            _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            _http = new HttpClient(new DeviceTokenHandler(config)) { Timeout = TimeSpan.FromSeconds(30) };
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: creating outbox");
             var outboxPath = System.IO.Path.Combine(stateDir, "outbox.db");
             await using var outbox = new SqliteOutbox(outboxPath);

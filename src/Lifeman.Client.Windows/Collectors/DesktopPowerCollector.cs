@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
-using System.Threading.Channels;
 using Lifeman.Client.Collectors;
 using Microsoft.Win32;
 
@@ -14,31 +13,18 @@ public sealed class DesktopPowerCollector : ICollector
 {
     public string Surface => "desktop.power";
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            emit(Snapshot("startup"));
 
-        channel.Writer.TryWrite(Snapshot("startup"));
+            PowerModeChangedEventHandler handler = (_, e) =>
+                emit(Snapshot(e.Mode.ToString().ToLowerInvariant()));
+            SystemEvents.PowerModeChanged += handler;
 
-        PowerModeChangedEventHandler handler = (_, e) =>
-        {
-            channel.Writer.TryWrite(Snapshot(e.Mode.ToString().ToLowerInvariant()));
-        };
-        SystemEvents.PowerModeChanged += handler;
-        using var reg = ct.Register(() =>
-        {
-            SystemEvents.PowerModeChanged -= handler;
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var ev in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return ev;
-    }
+            return ChannelCollectorScaffold.Teardown(
+                () => SystemEvents.PowerModeChanged -= handler);
+        }, ct);
 
     private static CollectedEvent Snapshot(string trigger)
     {

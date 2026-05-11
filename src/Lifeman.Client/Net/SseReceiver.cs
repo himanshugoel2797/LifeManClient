@@ -83,10 +83,14 @@ public sealed class SseReceiver
             throw new InvalidOperationException("No device token — pair before starting SSE.");
 
         // EventSource semantics: token goes in the query string, not a header.
+        // The DeviceTokenHandler would also attach Authorization, but the
+        // kernel's /events endpoint authenticates on ?token=… exclusively
+        // for compatibility with browser EventSource clients — the header
+        // would be redundant but harmless.
         var url = await _client.BuildUriAsync($"events?token={Uri.EscapeDataString(token)}", ct).ConfigureAwait(false);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Accept.ParseAdd("text/event-stream");
-        using var resp = await _client.Raw.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
             await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);
@@ -200,8 +204,7 @@ public sealed class SseReceiver
         // URL-encode the cursor — the `+` in the timezone offset becomes a
         // space otherwise and pagination silently skips an event.
         var path = $"api/outputs/pending?since={Uri.EscapeDataString(cursor)}";
-        using var req = await _client.CreateAuthedRequestAsync(HttpMethod.Get, path, ct).ConfigureAwait(false);
-        using var resp = await _client.Raw.SendAsync(req, ct).ConfigureAwait(false);
+        using var resp = await _client.SendAsync(HttpMethod.Get, path, ct: ct).ConfigureAwait(false);
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
             await _config.SetAsync(ConfigKeys.RepairRequired, "1", ct).ConfigureAwait(false);

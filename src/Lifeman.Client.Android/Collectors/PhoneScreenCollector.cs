@@ -1,6 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
-using Android.App;
 using Android.Content;
 using Android.OS;
 using Lifeman.Client.Collectors;
@@ -19,42 +17,36 @@ public sealed class PhoneScreenCollector : ICollector
 
     public PhoneScreenCollector(Context ctx) => _ctx = ctx;
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            var receiver = new ActionBroadcastReceiver(intent =>
+            {
+                switch (intent.Action)
+                {
+                    case Intent.ActionScreenOn: emit(Build("screen_on", true)); break;
+                    case Intent.ActionScreenOff: emit(Build("screen_off", false)); break;
+                    case Intent.ActionUserPresent: emit(Build("user_present", true)); break;
+                }
+            });
 
-        var receiver = new ScreenReceiver((trigger, interactive) =>
-            channel.Writer.TryWrite(Emit(trigger, interactive)));
+            var filter = new IntentFilter();
+            filter.AddAction(Intent.ActionScreenOn);
+            filter.AddAction(Intent.ActionScreenOff);
+            filter.AddAction(Intent.ActionUserPresent);
+            _ctx.RegisterReceiver(receiver, filter);
 
-        var filter = new IntentFilter();
-        filter.AddAction(Intent.ActionScreenOn);
-        filter.AddAction(Intent.ActionScreenOff);
-        filter.AddAction(Intent.ActionUserPresent);
-        _ctx.RegisterReceiver(receiver, filter);
+            // Startup snapshot. PowerManager.IsInteractive returns true if
+            // screen is on regardless of lock state — matches what the
+            // ScreenOn broadcast would have told us at boot.
+            var pm = (PowerManager?)_ctx.GetSystemService(Context.PowerService);
+            emit(Build("startup", pm?.IsInteractive ?? true));
 
-        // Startup snapshot. PowerManager.IsInteractive returns true if
-        // screen is on regardless of lock state — matches what the
-        // ScreenOn broadcast would have told us at boot.
-        var pm = (PowerManager?)_ctx.GetSystemService(Context.PowerService);
-        var interactive = pm?.IsInteractive ?? true;
-        channel.Writer.TryWrite(Emit("startup", interactive));
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+        }, ct);
 
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
-
-    private CollectedEvent Emit(string trigger, bool interactive)
+    private CollectedEvent Build(string trigger, bool interactive)
     {
         var payload = JsonSerializer.Serialize(new
         {
@@ -63,22 +55,5 @@ public sealed class PhoneScreenCollector : ICollector
             timestamp = DateTimeOffset.UtcNow.ToString("O"),
         });
         return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
-    }
-
-    private sealed class ScreenReceiver : BroadcastReceiver
-    {
-        private readonly Action<string, bool> _onChange;
-        public ScreenReceiver(Action<string, bool> onChange) => _onChange = onChange;
-
-        public override void OnReceive(Context? context, Intent? intent)
-        {
-            if (intent?.Action is null) return;
-            switch (intent.Action)
-            {
-                case Intent.ActionScreenOn: _onChange("screen_on", true); break;
-                case Intent.ActionScreenOff: _onChange("screen_off", false); break;
-                case Intent.ActionUserPresent: _onChange("user_present", true); break;
-            }
-        }
     }
 }

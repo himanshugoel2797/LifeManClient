@@ -92,7 +92,7 @@ public sealed class UnifiedPushRegistrationTests
         await cfg.SetAsync(ConfigKeys.DeviceToken, "device-tok");
         var capture = new List<HttpRequestMessage>();
         var handler = new StubHandler(req => { capture.Add(req); return respond(req); });
-        var http = new LifemanHttpClient(new HttpClient(handler), cfg);
+        var http = new LifemanHttpClient(new HttpClient(new DeviceTokenHandler(cfg, handler)), cfg);
         return (cfg, http, capture);
     }
 

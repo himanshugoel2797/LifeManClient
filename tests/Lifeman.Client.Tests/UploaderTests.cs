@@ -33,7 +33,7 @@ public sealed class UploaderTests : IAsyncLifetime
 
     private Uploader Build(StubHandler handler, UploaderOptions? options = null)
     {
-        var http = new HttpClient(handler);
+        var http = new HttpClient(new DeviceTokenHandler(_config, handler));
         var client = new LifemanHttpClient(http, _config);
         return new Uploader(_outbox, client, _config, options ?? new UploaderOptions
         {

@@ -83,9 +83,8 @@ public sealed class UpdateChecker
         UpdateInfo? info;
         try
         {
-            using var req = await _http.CreateAuthedRequestAsync(
-                HttpMethod.Get, $"api/system/client-updates/{_platform}", ct).ConfigureAwait(false);
-            using var resp = await _http.Raw.SendAsync(req, ct).ConfigureAwait(false);
+            using var resp = await _http.SendAsync(
+                HttpMethod.Get, $"api/system/client-updates/{_platform}", ct: ct).ConfigureAwait(false);
             if (resp.StatusCode == HttpStatusCode.NotFound) return null;
             if (!resp.IsSuccessStatusCode)
             {

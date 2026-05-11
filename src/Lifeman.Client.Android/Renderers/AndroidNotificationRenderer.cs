@@ -151,7 +151,8 @@ public sealed class ActionResponseReceiver : BroadcastReceiver
             try
             {
                 var config = new Config.KeystoreConfigStore(context.ApplicationContext!);
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                using var handler = new global::Lifeman.Client.Net.DeviceTokenHandler(config);
+                using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
                 var lh = new global::Lifeman.Client.Net.LifemanHttpClient(http, config);
                 var responses = new OutputResponseClient(lh, config);
                 await responses.RespondAsync(outputId, label).ConfigureAwait(false);

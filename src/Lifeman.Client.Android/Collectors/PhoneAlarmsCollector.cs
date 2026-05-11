@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.App;
 using Android.Content;
 using Lifeman.Client.Collectors;
@@ -17,53 +16,34 @@ public sealed class PhoneAlarmsCollector : ICollector
 
     public PhoneAlarmsCollector(Context ctx) => _ctx = ctx;
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var am = (AlarmManager?)_ctx.GetSystemService(Context.AlarmService);
-        if (am is null) yield break;
-
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            var am = (AlarmManager?)_ctx.GetSystemService(Context.AlarmService);
+            if (am is null) return ChannelCollectorScaffold.Teardown(() => { });
 
-        void Push(string trigger)
-        {
-            var info = am.NextAlarmClock;
-            var payload = JsonSerializer.Serialize(new
+            CollectedEvent Build(string trigger)
             {
-                trigger,
-                has_alarm = info is not null,
-                trigger_time_ms = info?.TriggerTime,
-                trigger_at = info is null ? null
-                    : DateTimeOffset.FromUnixTimeMilliseconds(info.TriggerTime).ToString("O"),
-                timestamp = DateTimeOffset.UtcNow.ToString("O"),
-            });
-            channel.Writer.TryWrite(new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow));
-        }
+                var info = am.NextAlarmClock;
+                var payload = JsonSerializer.Serialize(new
+                {
+                    trigger,
+                    has_alarm = info is not null,
+                    trigger_time_ms = info?.TriggerTime,
+                    trigger_at = info is null ? null
+                        : DateTimeOffset.FromUnixTimeMilliseconds(info.TriggerTime).ToString("O"),
+                    timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                });
+                return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
+            }
 
-        var receiver = new AlarmReceiver(() => Push("alarm_clock_changed"));
-        _ctx.RegisterReceiver(receiver,
-            new IntentFilter(AlarmManager.ActionNextAlarmClockChanged));
+            var receiver = new ActionBroadcastReceiver(_ => emit(Build("alarm_clock_changed")));
+            _ctx.RegisterReceiver(receiver,
+                new IntentFilter(AlarmManager.ActionNextAlarmClockChanged));
 
-        Push("startup");
+            emit(Build("startup"));
 
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
-
-    private sealed class AlarmReceiver : BroadcastReceiver
-    {
-        private readonly Action _onChange;
-        public AlarmReceiver(Action onChange) => _onChange = onChange;
-        public override void OnReceive(Context? context, Intent? intent) => _onChange();
-    }
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+        }, ct);
 }

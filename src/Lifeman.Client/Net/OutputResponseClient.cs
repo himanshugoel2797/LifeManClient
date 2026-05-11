@@ -22,8 +22,7 @@ public sealed class OutputResponseClient
         if (!string.IsNullOrEmpty(rawInput))
             path += $"&raw_input={Uri.EscapeDataString(rawInput)}";
 
-        using var req = await _client.CreateAuthedRequestAsync(HttpMethod.Post, path, ct).ConfigureAwait(false);
-        using var resp = await _client.Raw.SendAsync(req, ct).ConfigureAwait(false);
+        using var resp = await _client.SendAsync(HttpMethod.Post, path, ct: ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
     }
 }

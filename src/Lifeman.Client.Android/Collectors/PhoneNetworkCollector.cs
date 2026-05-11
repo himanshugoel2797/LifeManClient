@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.Content;
 using Android.Net;
 using Lifeman.Client.Collectors;
@@ -27,58 +26,47 @@ public sealed class PhoneNetworkCollector : ICollector
         _uploader = uploader;
     }
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var cm = (ConnectivityManager?)_ctx.GetSystemService(Context.ConnectivityService);
-        if (cm is null) yield break;
-
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            var cm = (ConnectivityManager?)_ctx.GetSystemService(Context.ConnectivityService);
+            if (cm is null) return ChannelCollectorScaffold.Teardown(() => { });
 
-        void Push(string trigger, Network? net, NetworkCapabilities? caps)
-        {
-            var snap = Snapshot(trigger, net, caps);
-            _uploader?.SetNetworkProfile(isMetered: snap.metered);
-            channel.Writer.TryWrite(new CollectedEvent(Surface,
-                JsonSerializer.Serialize(snap, SnapJson.Options), DateTimeOffset.UtcNow));
-        }
+            void Push(string trigger, Network? net, NetworkCapabilities? caps)
+            {
+                var (transport, validated, metered, roaming, captive) = Read(caps);
+                _uploader?.SetNetworkProfile(isMetered: metered);
 
-        var callback = new Callback(Push);
-        var request = new NetworkRequest.Builder()
-            ?.AddCapability(NetCapability.Internet)
-            ?.Build();
-        if (request is not null) cm.RegisterNetworkCallback(request, callback);
+                var payload = JsonSerializer.Serialize(new
+                {
+                    trigger,
+                    available = net is not null,
+                    metered,
+                    validated,
+                    roaming,
+                    captive_portal = captive,
+                    transport,
+                    timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                });
+                emit(new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow));
+            }
 
-        // Startup snapshot from the currently-active network.
-        var active = cm.ActiveNetwork;
-        var activeCaps = active is null ? null : cm.GetNetworkCapabilities(active);
-        Push("startup", active, activeCaps);
+            var callback = new Callback(Push);
+            var request = new NetworkRequest.Builder()
+                ?.AddCapability(NetCapability.Internet)
+                ?.Build();
+            if (request is not null) cm.RegisterNetworkCallback(request, callback);
 
-        using var reg = ct.Register(() =>
-        {
-            try { cm.UnregisterNetworkCallback(callback); } catch { }
-            channel.Writer.TryComplete();
-        });
+            // Startup snapshot from the currently-active network.
+            var active = cm.ActiveNetwork;
+            var activeCaps = active is null ? null : cm.GetNetworkCapabilities(active);
+            Push("startup", active, activeCaps);
 
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { cm.UnregisterNetworkCallback(callback); } catch { } });
+        }, ct);
 
-    private sealed record Snap(string trigger, bool available, bool metered, bool validated,
-        bool roaming, bool captive_portal, string transport, string timestamp);
-
-    private static class SnapJson
-    {
-        // snake_case fields are already correct on Snap; default options
-        // preserve them verbatim.
-        public static readonly JsonSerializerOptions Options = new();
-    }
-
-    private static Snap Snapshot(string trigger, Network? net, NetworkCapabilities? caps)
+    private static (string transport, bool validated, bool metered, bool roaming, bool captive) Read(NetworkCapabilities? caps)
     {
         var transport = caps switch
         {
@@ -94,15 +82,7 @@ public sealed class PhoneNetworkCollector : ICollector
         var metered = !(caps?.HasCapability(NetCapability.NotMetered) ?? false);
         var roaming = !(caps?.HasCapability(NetCapability.NotRoaming) ?? true);
         var captive = caps?.HasCapability(NetCapability.CaptivePortal) ?? false;
-        return new Snap(
-            trigger: trigger,
-            available: net is not null,
-            metered: metered,
-            validated: validated,
-            roaming: roaming,
-            captive_portal: captive,
-            transport: transport,
-            timestamp: DateTimeOffset.UtcNow.ToString("O"));
+        return (transport, validated, metered, roaming, captive);
     }
 
     private sealed class Callback : ConnectivityManager.NetworkCallback

@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
-using System.Threading.Channels;
 using Lifeman.Client.Collectors;
 using Microsoft.Win32;
 
@@ -15,29 +14,18 @@ public sealed class DesktopSessionCollector : ICollector
 {
     public string Surface => "desktop.session";
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            emit(Emit("startup"));
 
-        channel.Writer.TryWrite(Emit("startup"));
+            SessionSwitchEventHandler handler = (_, e) =>
+                emit(Emit(e.Reason.ToString().ToLowerInvariant()));
+            SystemEvents.SessionSwitch += handler;
 
-        SessionSwitchEventHandler handler = (_, e) =>
-            channel.Writer.TryWrite(Emit(e.Reason.ToString().ToLowerInvariant()));
-        SystemEvents.SessionSwitch += handler;
-        using var reg = ct.Register(() =>
-        {
-            SystemEvents.SessionSwitch -= handler;
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
+            return ChannelCollectorScaffold.Teardown(
+                () => SystemEvents.SessionSwitch -= handler);
+        }, ct);
 
     private static CollectedEvent Emit(string trigger)
     {

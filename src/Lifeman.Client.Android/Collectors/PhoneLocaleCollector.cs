@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.Content;
 using Android.Content.Res;
 using Lifeman.Client.Collectors;
@@ -18,61 +17,42 @@ public sealed class PhoneLocaleCollector : ICollector
 
     public PhoneLocaleCollector(Context ctx) => _ctx = ctx;
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
-
-        void Push(string trigger)
-        {
-            var locale = Resources.System!.Configuration!.Locales!.Get(0);
-            var tz = Java.Util.TimeZone.Default!;
-            var payload = JsonSerializer.Serialize(new
+            CollectedEvent Build(string trigger)
             {
-                trigger,
-                locale = locale?.ToLanguageTag(),
-                language = locale?.Language,
-                country = locale?.Country,
-                timezone_id = tz.ID,
-                utc_offset_minutes = tz.RawOffset / (60 * 1000),
-                timestamp = DateTimeOffset.UtcNow.ToString("O"),
-            });
-            channel.Writer.TryWrite(new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow));
-        }
-
-        var receiver = new LocaleReceiver(Push);
-        var filter = new IntentFilter();
-        filter.AddAction(Intent.ActionLocaleChanged);
-        filter.AddAction(Intent.ActionTimezoneChanged);
-        _ctx.RegisterReceiver(receiver, filter);
-
-        Push("startup");
-
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
-
-    private sealed class LocaleReceiver : BroadcastReceiver
-    {
-        private readonly Action<string> _onChange;
-        public LocaleReceiver(Action<string> onChange) => _onChange = onChange;
-        public override void OnReceive(Context? context, Intent? intent)
-        {
-            switch (intent?.Action)
-            {
-                case Intent.ActionLocaleChanged: _onChange("locale_changed"); break;
-                case Intent.ActionTimezoneChanged: _onChange("timezone_changed"); break;
+                var locale = Resources.System!.Configuration!.Locales!.Get(0);
+                var tz = Java.Util.TimeZone.Default!;
+                var payload = JsonSerializer.Serialize(new
+                {
+                    trigger,
+                    locale = locale?.ToLanguageTag(),
+                    language = locale?.Language,
+                    country = locale?.Country,
+                    timezone_id = tz.ID,
+                    utc_offset_minutes = tz.RawOffset / (60 * 1000),
+                    timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                });
+                return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
             }
-        }
-    }
+
+            var receiver = new ActionBroadcastReceiver(intent =>
+            {
+                switch (intent.Action)
+                {
+                    case Intent.ActionLocaleChanged: emit(Build("locale_changed")); break;
+                    case Intent.ActionTimezoneChanged: emit(Build("timezone_changed")); break;
+                }
+            });
+            var filter = new IntentFilter();
+            filter.AddAction(Intent.ActionLocaleChanged);
+            filter.AddAction(Intent.ActionTimezoneChanged);
+            _ctx.RegisterReceiver(receiver, filter);
+
+            emit(Build("startup"));
+
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+        }, ct);
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.Content;
 using Android.Media;
 using Lifeman.Client.Collectors;
@@ -17,34 +16,24 @@ public sealed class PhoneHeadphonesCollector : ICollector
 
     public PhoneHeadphonesCollector(Context ctx) => _ctx = ctx;
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            var receiver = new ActionBroadcastReceiver(intent =>
+            {
+                if (intent.Action == AudioManager.ActionHeadsetPlug)
+                    emit(Build("headset_plug", intent));
+            });
 
-        var receiver = new HeadsetReceiver((trigger, intent) =>
-            channel.Writer.TryWrite(Emit(trigger, intent)));
+            // Sticky broadcast: the returned intent represents the current state.
+            var sticky = _ctx.RegisterReceiver(receiver, new IntentFilter(AudioManager.ActionHeadsetPlug));
+            if (sticky is not null) emit(Build("startup", sticky));
 
-        var filter = new IntentFilter(AudioManager.ActionHeadsetPlug);
-        // Sticky: the returned intent represents the current state.
-        var sticky = _ctx.RegisterReceiver(receiver, filter);
-        if (sticky is not null) channel.Writer.TryWrite(Emit("startup", sticky));
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+        }, ct);
 
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
-
-    private CollectedEvent Emit(string trigger, Intent intent)
+    private CollectedEvent Build(string trigger, Intent intent)
     {
         var state = intent.GetIntExtra("state", -1); // 0 unplugged, 1 plugged
         var hasMic = intent.GetIntExtra("microphone", -1) == 1;
@@ -58,16 +47,5 @@ public sealed class PhoneHeadphonesCollector : ICollector
             timestamp = DateTimeOffset.UtcNow.ToString("O"),
         });
         return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
-    }
-
-    private sealed class HeadsetReceiver : BroadcastReceiver
-    {
-        private readonly Action<string, Intent> _onChange;
-        public HeadsetReceiver(Action<string, Intent> onChange) => _onChange = onChange;
-        public override void OnReceive(Context? context, Intent? intent)
-        {
-            if (intent?.Action == AudioManager.ActionHeadsetPlug)
-                _onChange("headset_plug", intent);
-        }
     }
 }

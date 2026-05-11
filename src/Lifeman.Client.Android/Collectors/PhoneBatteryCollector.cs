@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.Content;
 using Android.OS;
 using Lifeman.Client.Collectors;
@@ -17,44 +16,39 @@ public sealed class PhoneBatteryCollector : ICollector
 
     public PhoneBatteryCollector(Context ctx) => _ctx = ctx;
 
-    public async IAsyncEnumerable<CollectedEvent> StreamAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
+    public IAsyncEnumerable<CollectedEvent> StreamAsync(CancellationToken ct) =>
+        ChannelCollectorScaffold.StreamAsync(emit =>
         {
-            SingleReader = true,
-            SingleWriter = false,
-        });
+            var receiver = new ActionBroadcastReceiver(intent =>
+            {
+                var trigger = intent.Action switch
+                {
+                    Intent.ActionPowerConnected => "power_connected",
+                    Intent.ActionPowerDisconnected => "power_disconnected",
+                    Intent.ActionBatteryChanged => "battery_changed",
+                    _ => "unknown",
+                };
+                var ev = BuildEvent(intent, trigger);
+                if (ev is not null) emit(ev);
+            });
 
-        var receiver = new BatteryReceiver((intent, trigger) =>
-        {
-            var ev = BuildEvent(intent, trigger);
-            if (ev is not null) channel.Writer.TryWrite(ev);
-        });
+            var filter = new IntentFilter();
+            filter.AddAction(Intent.ActionBatteryChanged);
+            filter.AddAction(Intent.ActionPowerConnected);
+            filter.AddAction(Intent.ActionPowerDisconnected);
 
-        var filter = new IntentFilter();
-        filter.AddAction(Intent.ActionBatteryChanged);
-        filter.AddAction(Intent.ActionPowerConnected);
-        filter.AddAction(Intent.ActionPowerDisconnected);
+            // Sticky broadcast: registerReceiver returns the current
+            // battery intent immediately, which becomes our snapshot.
+            var sticky = _ctx.RegisterReceiver(receiver, filter);
+            if (sticky is not null)
+            {
+                var ev = BuildEvent(sticky, "startup");
+                if (ev is not null) emit(ev);
+            }
 
-        // Sticky broadcast: registerReceiver returns the current
-        // battery intent immediately, which becomes our snapshot.
-        var sticky = _ctx.RegisterReceiver(receiver, filter);
-        if (sticky is not null)
-        {
-            var ev = BuildEvent(sticky, "startup");
-            if (ev is not null) channel.Writer.TryWrite(ev);
-        }
-
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
-    }
+            return ChannelCollectorScaffold.Teardown(
+                () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+        }, ct);
 
     private CollectedEvent? BuildEvent(Intent intent, string trigger)
     {
@@ -85,24 +79,5 @@ public sealed class PhoneBatteryCollector : ICollector
             timestamp = DateTimeOffset.UtcNow.ToString("O"),
         });
         return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
-    }
-
-    private sealed class BatteryReceiver : BroadcastReceiver
-    {
-        private readonly Action<Intent, string> _onIntent;
-        public BatteryReceiver(Action<Intent, string> onIntent) => _onIntent = onIntent;
-
-        public override void OnReceive(Context? context, Intent? intent)
-        {
-            if (intent is null) return;
-            var trigger = intent.Action switch
-            {
-                Intent.ActionPowerConnected => "power_connected",
-                Intent.ActionPowerDisconnected => "power_disconnected",
-                Intent.ActionBatteryChanged => "battery_changed",
-                _ => "unknown",
-            };
-            _onIntent(intent, trigger);
-        }
     }
 }

@@ -64,10 +64,8 @@ public sealed class UnifiedPushRegistration
 
         try
         {
-            using var req = await _http.CreateAuthedRequestAsync(
-                HttpMethod.Post, "api/devices/push-token", ct).ConfigureAwait(false);
-            req.Content = JsonContent.Create(new PushTokenRequest("unifiedpush", endpoint), options: LifemanJson.Options);
-            using var resp = await _http.Raw.SendAsync(req, ct).ConfigureAwait(false);
+            using var content = JsonContent.Create(new PushTokenRequest("unifiedpush", endpoint), options: LifemanJson.Options);
+            using var resp = await _http.SendAsync(HttpMethod.Post, "api/devices/push-token", content, ct: ct).ConfigureAwait(false);
             if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.NotImplemented)
             {
                 _logger.LogDebug("server has no push-token endpoint yet (status {Status})", resp.StatusCode);
@@ -91,10 +89,8 @@ public sealed class UnifiedPushRegistration
     {
         try
         {
-            using var req = await _http.CreateAuthedRequestAsync(
-                HttpMethod.Delete, "api/devices/push-token", ct).ConfigureAwait(false);
-            using var resp = await _http.Raw.SendAsync(req, ct).ConfigureAwait(false);
-            _ = resp; // 200/204/404/501 all treated as success — see method comment.
+            using var resp = await _http.SendAsync(HttpMethod.Delete, "api/devices/push-token", ct: ct).ConfigureAwait(false);
+            // 200/204/404/501 all treated as success — see method comment.
         }
         catch (HttpRequestException ex)
         {

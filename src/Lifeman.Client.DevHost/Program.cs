@@ -26,7 +26,7 @@ using var loggerFactory = LoggerFactory.Create(b => b
     })
     .SetMinimumLevel(LogLevel.Information));
 
-using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+using var http = new HttpClient(new DeviceTokenHandler(config)) { Timeout = TimeSpan.FromSeconds(30) };
 var ctSource = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; ctSource.Cancel(); };
 

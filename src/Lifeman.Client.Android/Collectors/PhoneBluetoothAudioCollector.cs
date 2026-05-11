@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Threading.Channels;
 using Android.Bluetooth;
 using Android.Content;
 using Android.Content.PM;
@@ -43,65 +42,52 @@ public sealed class PhoneBluetoothAudioCollector : ICollector
             yield break;
         }
 
-        var channel = Channel.CreateUnbounded<CollectedEvent>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false,
-        });
-
-        void Push(string profile, int state, BluetoothDevice? device)
-        {
-            var payload = JsonSerializer.Serialize(new
-            {
-                profile,
-                state = state switch
-                {
-                    (int)ProfileState.Connected => "connected",
-                    (int)ProfileState.Disconnected => "disconnected",
-                    (int)ProfileState.Connecting => "connecting",
-                    (int)ProfileState.Disconnecting => "disconnecting",
-                    _ => "unknown",
-                },
-                device_address = device?.Address,
-                device_name = device?.Name,
-                timestamp = DateTimeOffset.UtcNow.ToString("O"),
-            });
-            channel.Writer.TryWrite(new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow));
-        }
-
-        var receiver = new BtAudioReceiver(Push);
-        var filter = new IntentFilter();
-        filter.AddAction(BluetoothA2dp.ActionConnectionStateChanged);
-        filter.AddAction(BluetoothHeadset.ActionConnectionStateChanged);
-        _ctx.RegisterReceiver(receiver, filter);
-
-        using var reg = ct.Register(() =>
-        {
-            try { _ctx.UnregisterReceiver(receiver); } catch { }
-            channel.Writer.TryComplete();
-        });
-
-        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-            yield return item;
+        await foreach (var ev in ChannelCollectorScaffold.StreamAsync(Attach, ct).ConfigureAwait(false))
+            yield return ev;
     }
 
-    private sealed class BtAudioReceiver : BroadcastReceiver
+    private IDisposable Attach(Action<CollectedEvent> emit)
     {
-        private readonly Action<string, int, BluetoothDevice?> _onChange;
-        public BtAudioReceiver(Action<string, int, BluetoothDevice?> onChange) => _onChange = onChange;
-
-        public override void OnReceive(Context? context, Intent? intent)
+        var receiver = new ActionBroadcastReceiver(intent =>
         {
-            if (intent?.Action is null) return;
             var profile = intent.Action switch
             {
                 _ when intent.Action == BluetoothA2dp.ActionConnectionStateChanged => "a2dp",
                 _ when intent.Action == BluetoothHeadset.ActionConnectionStateChanged => "headset",
                 _ => "unknown",
             };
+            if (profile == "unknown") return;
             var state = intent.GetIntExtra(BluetoothProfile.ExtraState, -1);
             var device = (BluetoothDevice?)intent.GetParcelableExtra(BluetoothDevice.ExtraDevice);
-            _onChange(profile, state, device);
-        }
+            emit(BuildEvent(profile, state, device));
+        });
+
+        var filter = new IntentFilter();
+        filter.AddAction(BluetoothA2dp.ActionConnectionStateChanged);
+        filter.AddAction(BluetoothHeadset.ActionConnectionStateChanged);
+        _ctx.RegisterReceiver(receiver, filter);
+
+        return ChannelCollectorScaffold.Teardown(
+            () => { try { _ctx.UnregisterReceiver(receiver); } catch { } });
+    }
+
+    private CollectedEvent BuildEvent(string profile, int state, BluetoothDevice? device)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            profile,
+            state = state switch
+            {
+                (int)ProfileState.Connected => "connected",
+                (int)ProfileState.Disconnected => "disconnected",
+                (int)ProfileState.Connecting => "connecting",
+                (int)ProfileState.Disconnecting => "disconnecting",
+                _ => "unknown",
+            },
+            device_address = device?.Address,
+            device_name = device?.Name,
+            timestamp = DateTimeOffset.UtcNow.ToString("O"),
+        });
+        return new CollectedEvent(Surface, payload, DateTimeOffset.UtcNow);
     }
 }
