@@ -39,8 +39,13 @@ public sealed class UpdateChecker
     private readonly string _platform;
     private readonly string _currentVersion;
     private readonly UpdateCheckerOptions _options;
+    private readonly UpdateDownloader? _downloader;
     private readonly ILogger<UpdateChecker> _logger;
     private string? _lastNotifiedVersion;
+
+    /// Last successfully-staged update on disk. Heads expose this for
+    /// `apply-update` to find without re-querying the kernel.
+    public StagedUpdate? StagedUpdate { get; private set; }
 
     public UpdateChecker(
         LifemanHttpClient http,
@@ -48,13 +53,15 @@ public sealed class UpdateChecker
         string platform,
         string currentVersion,
         UpdateCheckerOptions? options = null,
-        ILogger<UpdateChecker>? logger = null)
+        ILogger<UpdateChecker>? logger = null,
+        UpdateDownloader? downloader = null)
     {
         _http = http;
         _renderer = renderer;
         _platform = platform;
         _currentVersion = currentVersion;
         _options = options ?? new UpdateCheckerOptions();
+        _downloader = downloader;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<UpdateChecker>.Instance;
     }
 
@@ -99,6 +106,21 @@ public sealed class UpdateChecker
         if (!IsNewer(info.Version, _currentVersion)) return null;
         if (string.Equals(info.Version, _lastNotifiedVersion, StringComparison.Ordinal)) return info;
 
+        // Try to fetch + verify the artifact ahead of notifying. If
+        // download/sha256 fails the user still sees a "go grab it
+        // manually" toast — the staging step is opportunistic.
+        if (_downloader is not null)
+        {
+            try
+            {
+                StagedUpdate = await _downloader.DownloadAsync(info, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "update staging failed; will still notify");
+            }
+        }
+
         await NotifyAsync(info, ct).ConfigureAwait(false);
         _lastNotifiedVersion = info.Version;
         return info;
@@ -110,6 +132,9 @@ public sealed class UpdateChecker
         // namespaced so the renderer's dedup table doesn't collide with
         // server-issued IDs and so a repeat notify across restarts replaces
         // (not stacks) the prior toast.
+        var body = StagedUpdate is not null
+            ? $"Downloaded + verified. Run `apply-update` to install.\nStaged at: {StagedUpdate.LocalPath}"
+            : (info.Notes ?? "A newer client build is available. Download and install when convenient.");
         var deliver = new OutputDeliver(
             OutputId: $"client.update:{info.Version}",
             DeliveryId: $"client.update:{info.Version}",
@@ -118,7 +143,7 @@ public sealed class UpdateChecker
             Urgency: "soft",
             Content: new OutputContent(
                 Title: $"Lifeman client update available ({info.Version})",
-                Body: info.Notes ?? "A newer client build is available. Download and install when convenient."),
+                Body: body),
             Actions: Array.Empty<OutputAction>(),
             SourceTool: "client.update_checker",
             ExpiresAt: null,

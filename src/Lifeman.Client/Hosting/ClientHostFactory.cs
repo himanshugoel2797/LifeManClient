@@ -23,6 +23,9 @@ public sealed class ClientHostOptions
     public bool EnableUpdateChecker { get; init; } = true;
     /// On-disk outbox cap per CLIENT_DESIGN §"Local storage & offline".
     public long OutboxMaxBytes { get; init; } = 100L * 1024 * 1024;
+    /// Where `UpdateDownloader` stashes verified artifacts. If null,
+    /// the checker still notifies but doesn't pre-download.
+    public string? UpdateStagingDir { get; init; }
 }
 
 /// Wires the shared core pieces together. Each head supplies its
@@ -74,8 +77,13 @@ public sealed class ClientHostFactory
         UpdateChecker? updates = null;
         if (options.EnableUpdateChecker)
         {
+            UpdateDownloader? downloader = null;
+            if (!string.IsNullOrEmpty(options.UpdateStagingDir))
+                downloader = new UpdateDownloader(lifemanHttp, options.UpdateStagingDir,
+                    loggerFactory.CreateLogger<UpdateDownloader>());
             updates = new UpdateChecker(lifemanHttp, renderer, options.Platform, options.CurrentVersion,
-                logger: loggerFactory.CreateLogger<UpdateChecker>());
+                logger: loggerFactory.CreateLogger<UpdateChecker>(),
+                downloader: downloader);
         }
 
         var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,

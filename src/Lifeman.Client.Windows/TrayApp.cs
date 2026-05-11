@@ -90,6 +90,7 @@ public static class TrayApp
                 CurrentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0",
                 UploaderIdlePoll = TimeSpan.FromSeconds(2),
                 MeteredByDefault = false,
+                UpdateStagingDir = Path.Combine(stateDir, "updates"),
             });
         RuntimeState.CurrentOutbox = bundle.Outbox;
 

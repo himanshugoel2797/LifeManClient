@@ -16,6 +16,10 @@ var stateDir = Path.Combine(
 Directory.CreateDirectory(stateDir);
 var logDir = Path.Combine(stateDir, "logs");
 
+// On startup, sweep `.old` rollback files left over from the previous
+// apply-update (handles are released now that the prior process exited).
+UpdateApplier.SweepOldFiles(AppContext.BaseDirectory);
+
 // No-arg, `run`, or a `lifeman://` URL → tray mode (or forward-to-tray).
 if (args.Length == 0 || args[0] == "run")
 {
@@ -51,6 +55,7 @@ return args[0] switch
     "uninstall-autostart" => UninstallAutostart(),
     "register-url-handler" => RegisterUrlHandler(),
     "unregister-url-handler" => UnregisterUrlHandler(),
+    "apply-update" => ApplyUpdate(args.Skip(1).ToArray()),
     _ => Misuse(),
 };
 
@@ -126,6 +131,29 @@ int UnregisterUrlHandler()
     return 0;
 }
 
+int ApplyUpdate(string[] rest)
+{
+    var stagingDir = Path.Combine(stateDir, "updates");
+    var zip = rest.Length > 0 ? rest[0] : UpdateApplier.FindLatestArtifact(stagingDir);
+    if (string.IsNullOrEmpty(zip) || !File.Exists(zip))
+    {
+        Console.Error.WriteLine("no staged update found in " + stagingDir);
+        return 1;
+    }
+    Console.WriteLine($"applying update from {zip}");
+    try
+    {
+        UpdateApplier.Apply(zip);
+        Console.WriteLine("update applied; the new lifeman-client will launch in a few seconds.");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"apply-update failed: {ex.Message}");
+        return 1;
+    }
+}
+
 string ResolveExe() =>
     Environment.ProcessPath
     ?? Process.GetCurrentProcess().MainModule?.FileName
@@ -171,4 +199,5 @@ void PrintUsage() => Console.WriteLine("""
       lifeman-client uninstall-autostart
       lifeman-client register-url-handler
       lifeman-client unregister-url-handler
+      lifeman-client apply-update [path-to-zip]
     """);
