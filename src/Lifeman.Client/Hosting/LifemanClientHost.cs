@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Lifeman.Client.Collectors;
 using Lifeman.Client.Contracts;
+using Lifeman.Client.Health;
 using Lifeman.Client.Net;
 using Lifeman.Client.Outbox;
 using Lifeman.Client.Renderers;
@@ -18,6 +19,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
     private readonly SseReceiver _sse;
     private readonly IRenderer _renderer;
     private readonly IReadOnlyList<ICollector> _collectors;
+    private readonly IHealthStore _health;
+    private readonly Updates.UpdateChecker? _updates;
     private readonly ILogger<LifemanClientHost> _logger;
 
     public LifemanClientHost(
@@ -26,13 +29,17 @@ public sealed class LifemanClientHost : IAsyncDisposable
         SseReceiver sse,
         IRenderer renderer,
         IReadOnlyList<ICollector> collectors,
-        ILogger<LifemanClientHost>? logger = null)
+        ILogger<LifemanClientHost>? logger = null,
+        IHealthStore? health = null,
+        Updates.UpdateChecker? updates = null)
     {
         _outbox = outbox;
         _uploader = uploader;
         _sse = sse;
         _renderer = renderer;
         _collectors = collectors;
+        _health = health ?? new NullHealthStore();
+        _updates = updates;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<LifemanClientHost>.Instance;
         _sse.OnDeliver += DispatchDeliverAsync;
         _sse.OnCancel += (cancel, ct) => _renderer.DismissAsync(cancel.OutputId, ct);
@@ -64,6 +71,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
             _sse.RunAsync(ct),
             TrimReceivedLoopAsync(ct),
         };
+        if (_updates is not null)
+            tasks.Add(_updates.RunAsync(ct));
         foreach (var collector in _collectors)
             tasks.Add(RunCollectorAsync(collector, ct));
 
@@ -102,7 +111,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
             {
                 await foreach (var ev in collector.StreamAsync(ct).WithCancellation(ct).ConfigureAwait(false))
                 {
-                    await _outbox.EnqueueAsync(ev.Surface, ev.PayloadJson, ev.EmittedAt, ct).ConfigureAwait(false);
+                    await _outbox.EnqueueAsync(ev.Surface, ev.PayloadJson, ev.EmittedAt, ct: ct).ConfigureAwait(false);
+                    await _health.RecordSuccessAsync(collector.Surface, ct).ConfigureAwait(false);
                 }
                 // Stream completed cleanly (no permission, no work to do) — don't restart.
                 return;
@@ -122,7 +132,8 @@ public sealed class LifemanClientHost : IAsyncDisposable
                 });
                 try
                 {
-                    await _outbox.EnqueueAsync("client.collector_failure", payload, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                    await _outbox.EnqueueAsync("client.collector_failure", payload, DateTimeOffset.UtcNow, ct: ct).ConfigureAwait(false);
+                    await _health.RecordErrorAsync(collector.Surface, ex.Message, ct).ConfigureAwait(false);
                 }
                 catch
                 {

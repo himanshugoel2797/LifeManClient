@@ -34,7 +34,8 @@ public sealed class SqliteOutbox : IOutbox
                 payload_json TEXT NOT NULL,
                 emitted_at   TEXT NOT NULL,
                 attempts     INTEGER NOT NULL DEFAULT 0,
-                last_error   TEXT
+                last_error   TEXT,
+                is_critical  INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_outbox_emitted ON outbox(emitted_at);
             CREATE TABLE IF NOT EXISTS received (
@@ -42,26 +43,58 @@ public sealed class SqliteOutbox : IOutbox
                 received_at  TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_received_at ON received(received_at);
+            CREATE TABLE IF NOT EXISTS health (
+                surface          TEXT PRIMARY KEY,
+                last_success_at  TEXT,
+                last_error_at    TEXT,
+                last_error       TEXT,
+                success_count    INTEGER NOT NULL DEFAULT 0,
+                error_count      INTEGER NOT NULL DEFAULT 0
+            );
             """;
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+        // Live-migrate older outbox files that predate `is_critical`. The
+        // column-presence check beats catching "duplicate column" because
+        // SQLite returns it as a generic SqliteException.
+        await EnsureColumnAsync("outbox", "is_critical",
+            "ALTER TABLE outbox ADD COLUMN is_critical INTEGER NOT NULL DEFAULT 0;", ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask EnsureColumnAsync(string table, string column, string addSql, CancellationToken ct)
+    {
+        await using var info = Conn.CreateCommand();
+        info.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await info.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        await reader.DisposeAsync().ConfigureAwait(false);
+        await using var alter = Conn.CreateCommand();
+        alter.CommandText = addSql;
+        await alter.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private SqliteConnection Conn => _conn ?? throw new InvalidOperationException("Outbox not initialised — call InitAsync.");
 
-    public async ValueTask<long> EnqueueAsync(string surface, string payloadJson, DateTimeOffset emittedAt, CancellationToken ct = default)
+    public async ValueTask<long> EnqueueAsync(string surface, string payloadJson, DateTimeOffset emittedAt, bool isCritical = false, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             await using var cmd = Conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO outbox (surface, payload_json, emitted_at)
-                VALUES ($s, $p, $e);
+                INSERT INTO outbox (surface, payload_json, emitted_at, is_critical)
+                VALUES ($s, $p, $e, $c);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$s", surface);
             cmd.Parameters.AddWithValue("$p", payloadJson);
             cmd.Parameters.AddWithValue("$e", emittedAt.ToString("O"));
+            cmd.Parameters.AddWithValue("$c", isCritical ? 1 : 0);
             var id = (long)(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
             return id;
         }
@@ -78,7 +111,7 @@ public sealed class SqliteOutbox : IOutbox
         {
             await using var cmd = Conn.CreateCommand();
             cmd.CommandText = """
-                SELECT id, surface, payload_json, emitted_at, attempts, last_error
+                SELECT id, surface, payload_json, emitted_at, attempts, last_error, is_critical
                 FROM outbox
                 ORDER BY id ASC
                 LIMIT $n;
@@ -94,7 +127,8 @@ public sealed class SqliteOutbox : IOutbox
                     PayloadJson: reader.GetString(2),
                     EmittedAt: DateTimeOffset.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
                     Attempts: reader.GetInt32(4),
-                    LastError: reader.IsDBNull(5) ? null : reader.GetString(5)));
+                    LastError: reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsCritical: reader.GetInt32(6) != 0));
             }
             return results;
         }
@@ -181,16 +215,19 @@ public sealed class SqliteOutbox : IOutbox
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Drop oldest 10% by row count, then VACUUM. Coarse but cheap;
-            // we don't want to do a binary search over the file size on
-            // every overflow.
+            // Drop oldest 10% by row count from the non-critical pool, then
+            // VACUUM. Coarse but cheap; we don't want to do a binary search
+            // over the file size on every overflow. Critical rows are
+            // skipped so an `urgency=urgent` payload survives even when the
+            // outbox is wedged full of stale sensor noise.
             await using var countCmd = Conn.CreateCommand();
-            countCmd.CommandText = "SELECT COUNT(*) FROM outbox;";
+            countCmd.CommandText = "SELECT COUNT(*) FROM outbox WHERE is_critical = 0;";
             var total = (long)(await countCmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+            if (total == 0) return 0;
             var drop = (int)Math.Max(1, total / 10);
 
             await using var delCmd = Conn.CreateCommand();
-            delCmd.CommandText = "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox ORDER BY id ASC LIMIT $n);";
+            delCmd.CommandText = "DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE is_critical = 0 ORDER BY id ASC LIMIT $n);";
             delCmd.Parameters.AddWithValue("$n", drop);
             await delCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 

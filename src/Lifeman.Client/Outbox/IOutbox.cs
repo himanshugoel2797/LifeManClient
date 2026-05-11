@@ -6,7 +6,10 @@ public interface IOutbox : IAsyncDisposable
 
     /// Append a new event to the outbox. The payload is opaque JSON — the
     /// kernel's input router decides what it means by routing on `surface`.
-    ValueTask<long> EnqueueAsync(string surface, string payloadJson, DateTimeOffset emittedAt, CancellationToken ct = default);
+    /// Set `isCritical` for events that must survive a size-cap trim
+    /// (e.g. surfaced from `urgency=urgent` flows the user explicitly
+    /// flagged as load-bearing).
+    ValueTask<long> EnqueueAsync(string surface, string payloadJson, DateTimeOffset emittedAt, bool isCritical = false, CancellationToken ct = default);
 
     /// Peek the oldest N pending entries without removing them. Returned
     /// oldest-first so the kernel sees events in roughly the order they
@@ -24,8 +27,7 @@ public interface IOutbox : IAsyncDisposable
     ValueTask<long> CountAsync(CancellationToken ct = default);
 
     /// Drop oldest entries until the on-disk size is below the cap. Returns
-    /// number dropped. Critical events (urgency=urgent) are kept regardless
-    /// once that concept is plumbed through; v1 drops oldest first.
+    /// number dropped. Rows flagged `is_critical = 1` are preserved.
     ValueTask<int> TrimAsync(long maxBytes, CancellationToken ct = default);
 
     /// Atomically record that we've surfaced an output, so SSE-replay

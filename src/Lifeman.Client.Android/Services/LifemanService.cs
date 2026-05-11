@@ -9,9 +9,11 @@ using Lifeman.Client.Android.Logging;
 using Lifeman.Client.Android.Renderers;
 using Lifeman.Client.Collectors;
 using Lifeman.Client.Config;
+using Lifeman.Client.Health;
 using Lifeman.Client.Hosting;
 using Lifeman.Client.Net;
 using Lifeman.Client.Outbox;
+using Lifeman.Client.Updates;
 using Microsoft.Extensions.Logging;
 
 namespace Lifeman.Client.Android.Services;
@@ -101,7 +103,9 @@ public sealed class LifemanService : Service
 
             _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: creating outbox");
-            await using var outbox = new SqliteOutbox(System.IO.Path.Combine(stateDir, "outbox.db"));
+            var outboxPath = System.IO.Path.Combine(stateDir, "outbox.db");
+            await using var outbox = new SqliteOutbox(outboxPath);
+            var health = new SqliteHealthStore(outboxPath);
             CurrentOutbox = outbox;
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: wiring host");
             var lifemanHttp = new LifemanHttpClient(_http, config);
@@ -138,8 +142,13 @@ public sealed class LifemanService : Service
                 new PhoneBluetoothAudioCollector(ctx),      // needs BLUETOOTH_CONNECT (S+)
             };
 
+            var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            var updates = new UpdateChecker(lifemanHttp, renderer, "android", currentVersion,
+                logger: _loggerFactory.CreateLogger<UpdateChecker>());
             await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
-                _loggerFactory.CreateLogger<LifemanClientHost>());
+                _loggerFactory.CreateLogger<LifemanClientHost>(),
+                health: health,
+                updates: updates);
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync starting");
             await host.RunAsync(ct).ConfigureAwait(false);
             global::Android.Util.Log.Info("lifeman", "RunHostAsync: host.RunAsync returned");

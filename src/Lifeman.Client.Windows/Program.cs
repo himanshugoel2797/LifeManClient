@@ -3,9 +3,11 @@ using System.Runtime.Versioning;
 using Lifeman.Client.Collectors;
 using Lifeman.Client.Config;
 using Lifeman.Client.Contracts;
+using Lifeman.Client.Health;
 using Lifeman.Client.Hosting;
 using Lifeman.Client.Net;
 using Lifeman.Client.Outbox;
+using Lifeman.Client.Updates;
 using Lifeman.Client.Windows;
 using Lifeman.Client.Windows.Collectors;
 using Lifeman.Client.Windows.Config;
@@ -99,7 +101,9 @@ async Task<int> RunAsync()
         Console.Error.WriteLine("no device token — run `pair` first.");
         return 1;
     }
-    await using var outbox = new SqliteOutbox(Path.Combine(stateDir, "outbox.db"));
+    var outboxPath = Path.Combine(stateDir, "outbox.db");
+    await using var outbox = new SqliteOutbox(outboxPath);
+    var health = new SqliteHealthStore(outboxPath);
     RuntimeState.CurrentOutbox = outbox;
     var lifemanHttp = new LifemanHttpClient(http, config);
     var uploader = new Uploader(outbox, lifemanHttp, config,
@@ -123,9 +127,15 @@ async Task<int> RunAsync()
         new DesktopIdleCollector(),
         new DesktopNetworkCollector(uploader),
         new DesktopSessionCollector(),
+        new DesktopProcessListCollector(),
     };
+    var currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+    var updates = new UpdateChecker(lifemanHttp, renderer, "windows", currentVersion,
+        logger: loggerFactory.CreateLogger<UpdateChecker>());
     await using var host = new LifemanClientHost(outbox, uploader, sse, renderer, collectors,
-        loggerFactory.CreateLogger<LifemanClientHost>());
+        loggerFactory.CreateLogger<LifemanClientHost>(),
+        health: health,
+        updates: updates);
 
     var log = loggerFactory.CreateLogger("lifeman-client");
     log.LogInformation("running (collectors: {Count}, logs: {LogDir})", collectors.Count, logDir);

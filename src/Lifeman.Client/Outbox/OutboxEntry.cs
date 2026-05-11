@@ -8,7 +8,8 @@ public sealed record OutboxEntry(
     string PayloadJson,
     DateTimeOffset EmittedAt,
     int Attempts,
-    string? LastError)
+    string? LastError,
+    bool IsCritical = false)
 {
     public InputEvent ToInputEvent(string? source) => new(
         Surface: Surface,

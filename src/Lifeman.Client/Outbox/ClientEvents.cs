@@ -26,7 +26,7 @@ public static class ClientEvents
             action,
             timestamp = DateTimeOffset.UtcNow.ToString("O"),
         });
-        try { await outbox.EnqueueAsync(OutputEventSurface, payload, DateTimeOffset.UtcNow, ct).ConfigureAwait(false); }
+        try { await outbox.EnqueueAsync(OutputEventSurface, payload, DateTimeOffset.UtcNow, ct: ct).ConfigureAwait(false); }
         catch { /* best-effort side channel */ }
     }
 }
